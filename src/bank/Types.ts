@@ -119,3 +119,12 @@ export interface CascadedValidationResult {
   };
   timestamp: string;
 }
+// Tipos para Tasa BCV
+export interface BCVRateRequest {
+  // Objeto vacío según la documentación
+}
+
+export interface BCVRateResponse {
+  PriceRateBCV: number;
+  dtRate: string; // Formato: "dd/MM/yyyy"
+}

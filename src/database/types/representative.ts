@@ -13,8 +13,20 @@ export interface typerepresentative_full {
     parentIdentityCard?: string;
     parentAddress?: string;
     parentPhone?: string;
+    balance?: number;
+    userId?: string;
     createdAt?: Date;
     updatedAt?: Date;
+    students?: typestudent_response[]; // AÑADIR ESTA LÍNEA
+    getFinancialSummary?: () => {
+        currentBalance: number;
+        debtAmount: number;
+        availableCredit: number;
+        activeStudents: number;
+        monthlyFee: number;
+        nextPaymentDue: Date;
+        canEnrollNewStudent: boolean;
+    };
 }
 
 export interface typerepresentative_create {
@@ -23,6 +35,8 @@ export interface typerepresentative_create {
     address: string;
     phone: string;
     relationship: RelationshipType;
+    balance?: number;
+    userId?: string;
     parentName?: string;
     parentIdentityCard?: string;
     parentAddress?: string;
@@ -36,6 +50,8 @@ export interface typerepresentative_update {
     address?: string;
     phone?: string;
     relationship?: RelationshipType;
+    balance?: number;
+    userId?: string;
     parentName?: string;
     parentIdentityCard?: string;
     parentAddress?: string;
@@ -49,6 +65,8 @@ export interface typerepresentative_response {
     address: string;
     phone: string;
     relationship: RelationshipType;
+    balance: number;
+    userId?: string;
     parentName?: string;
     parentIdentityCard?: string;
     parentAddress?: string;

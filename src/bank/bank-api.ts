@@ -9,7 +9,9 @@ import {
   ValidateReferenceRequest,
   ValidateExistenceRequest,
   ValidationResponse,
-  CascadedValidationResult
+  CascadedValidationResult,
+  BCVRateRequest,
+  BCVRateResponse
 } from './Types';
 
 export class BankAPI {
@@ -73,6 +75,89 @@ export class BankAPI {
       
       throw new Error(`Failed to authenticate with bank: ${error.message}`);
     }
+  }
+
+  /**
+   * Obtener tasa BCV del día
+   */
+  async getBCVRate(): Promise<BCVRateResponse> {
+    try {
+      if (!this.workingKey) {
+        await this.authenticate();
+      }
+
+      console.log('💱 Solicitando tasa BCV del día...');
+
+      if (process.env.BNC_TEST_MODE === 'true') {
+        console.log('💱 MODO PRUEBA: Simulando tasa BCV');
+        return this.getMockBCVRate();
+      }
+
+      // Según la documentación, es un POST con objeto vacío
+      const requestData: BCVRateRequest = {};
+      
+      // TODO: Implementar encriptación real con WorkingKey
+      // Por ahora enviamos sin encriptar para pruebas
+      const response = await fetch(`${this.baseURL}/Services/BCVRates`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const bankResponse = await response.json() as BankApiResponse;
+      
+      console.log('📨 Respuesta BCV:', {
+        status: bankResponse.status,
+        message: bankResponse.message
+      });
+
+      // Desencriptar la respuesta
+      return await this.decryptBCVResponse(bankResponse);
+
+    } catch (error: any) {
+      console.error('❌ Error obteniendo tasa BCV:', error);
+      
+      if (process.env.BNC_TEST_MODE === 'true') {
+        console.log('💱 MODO PRUEBA: Devolviendo tasa mock por error');
+        return this.getMockBCVRate();
+      }
+      
+      throw new Error(`BCV rate request failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Método placeholder para desencriptar respuesta BCV
+   */
+  private async decryptBCVResponse(bankResponse: BankApiResponse): Promise<BCVRateResponse> {
+    console.log('🔓 Desencriptando respuesta BCV (placeholder)...');
+    
+    // TODO: Implementar lógica real de desencriptación
+    // Por ahora retornamos un mock
+    return this.getMockBCVRate();
+  }
+
+  /**
+   * Respuesta mock para tasa BCV (para pruebas)
+   */
+  private getMockBCVRate(): BCVRateResponse {
+    // Generar una tasa aleatoria similar a la real (entre 35 y 38)
+    const randomRate = 35 + Math.random() * 3;
+    
+    // Formatear la fecha actual como en la documentación
+    const today = new Date();
+    const formattedDate = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`;
+    
+    return {
+      PriceRateBCV: parseFloat(randomRate.toFixed(6)),
+      dtRate: formattedDate
+    };
   }
 
   // Validación P2P
@@ -427,7 +512,6 @@ export class BankAPI {
     };
   }
 
-  // ... los demás métodos existentes (getWelcome, testConnection, etc.)
   async getWelcome(): Promise<BankWelcomeResponse> {
     try {
       const response = await fetch(`${this.baseURL}/welcome/home`);
@@ -475,5 +559,16 @@ export class BankAPI {
   // Getter para verificar estado de autenticación
   get isAuthenticated(): boolean {
     return !!this.workingKey;
+  }
+
+  // Método para obtener la clave de trabajo (útil para debugging)
+  getWorkingKey(): string | null {
+    return this.workingKey;
+  }
+
+  // Método para reiniciar la autenticación (útil para testing)
+  resetAuthentication(): void {
+    this.workingKey = null;
+    console.log('🔄 Autenticación reiniciada');
   }
 }

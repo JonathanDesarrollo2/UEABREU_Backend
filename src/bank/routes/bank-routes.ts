@@ -11,7 +11,6 @@ const bankController = new BankController();
 router.get('/welcome', bankController.getBankWelcome);
 router.get('/test-connection', bankController.testBankConnection);
 router.get('/health', bankController.getBankHealth);
-router.get('/full-status', bankController.getBankFullStatus);
 
 // Autenticación
 router.post('/logon', bankController.bankLogOn);
@@ -70,5 +69,11 @@ router.post('/validate-existence',
   validateRoutes,
   bankController.validateExistence
 );
+
+// NUEVA RUTA: Tasa BCV del día
+router.get('/bcv-rate', bankController.getBCVRate);
+
+// Ruta para obtener información completa del estado del banco
+router.get('/full-status', bankController.getBankFullStatus);
 
 export default router;

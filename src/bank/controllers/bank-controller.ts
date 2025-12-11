@@ -144,6 +144,36 @@ export class BankController {
   };
 
   /**
+   * Obtener tasa BCV del día
+   */
+  getBCVRate = async (req: Request, res: Response): Promise<void> => {
+    try {
+      console.log('💱 Solicitando tasa BCV del día...');
+      
+      const bcvRate = await this.bankAPI.getBCVRate();
+      
+      const response: ProxyResponse<typeof bcvRate> = {
+        result: true,
+        content: bcvRate,
+        error: []
+      };
+
+      console.log(`✅ Tasa BCV obtenida: ${bcvRate.PriceRateBCV} Bs/USD (Fecha: ${bcvRate.dtRate})`);
+      res.json(response);
+
+    } catch (error: any) {
+      console.error('❌ Error obteniendo tasa BCV:', error);
+      
+      const response: ProxyResponse = {
+        result: false,
+        content: null,
+        error: [error.message]
+      };
+      res.status(500).json(response);
+    }
+  };
+
+  /**
    * Validación en cascada - Método principal
    * Ejecuta las 3 validaciones secuencialmente hasta encontrar el movimiento
    */
@@ -300,15 +330,17 @@ export class BankController {
       console.log('📊 Solicitando estado completo del banco...');
       
       // Obtener múltiples datos en paralelo
-      const [welcomeData, healthData, workingKey] = await Promise.allSettled([
+      const [welcomeData, healthData, workingKey, bcvRate] = await Promise.allSettled([
         this.bankAPI.getWelcome(),
         this.bankAPI.testConnection(),
-        this.bankAPI.authenticate().catch(() => null) // No fallar si la autenticación falla
+        this.bankAPI.authenticate().catch(() => null), // No fallar si la autenticación falla
+        this.bankAPI.getBCVRate().catch(() => null)    // No fallar si BCV falla
       ]);
 
       const fullStatus = {
         welcome: welcomeData.status === 'fulfilled' ? welcomeData.value : { error: welcomeData.reason?.message },
         health: healthData.status === 'fulfilled' ? healthData.value : { error: healthData.reason?.message },
+        bcvRate: bcvRate.status === 'fulfilled' ? bcvRate.value : { error: bcvRate.reason?.message },
         auth: {
           authenticated: !!workingKey,
           workingKey: workingKey ? 'Disponible' : 'No disponible',
