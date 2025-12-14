@@ -1,17 +1,26 @@
+# Dockerfile optimizado para UEABREU
 FROM node:22.15.0-alpine
+
 WORKDIR /usr/src/app
-# 1. Copia primero solo los archivos necesarios para npm install
-COPY package.json package-lock.json* tsconfig.json ./
-# 2. Instala dependencias (incluyendo devDependencies para el build)
-RUN npm install && npm cache clean --force
-# 3. Copia TODO el contenido (incluyendo start-dev.sh)
+
+# 1. Copia solo archivos de configuración primero (para cache)
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# 2. Instala dependencias
+RUN npm ci --only=production
+
+# 3. Copia todo el código fuente
 COPY . .
-# 4. Compila la aplicación
+
+# 4. Compila TypeScript (si tu package.json tiene script "build")
 RUN npm run build
-# 5. Limpieza (elimina devDependencies y archivos innecesarios)
-RUN npm prune --production && \
-    rm -rf src __tests__
-# 6. Permisos para el script (AHORA SÍ EXISTE)
-RUN chmod +x start-dev.sh
-EXPOSE 3000
-CMD ["./start-dev.sh"]
+
+# 5. Limpia archivos innecesarios
+RUN rm -rf src __tests__
+
+# 6. Expone el puerto (Cloud Run usa 8080)
+EXPOSE 8080
+
+# 7. Comando de inicio
+CMD ["node", "dist/index.js"]
