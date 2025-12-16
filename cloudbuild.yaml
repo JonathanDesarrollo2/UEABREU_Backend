@@ -1,7 +1,6 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', 'gcr.io/${PROJECT_ID}/ueabreu-backend:latest', '.']
-  # El builder de Docker sube automáticamente al usar un tag de gcr.io
 
 - name: 'gcr.io/cloud-builders/gcloud'
   args: [
@@ -11,20 +10,11 @@ steps:
     '--platform', 'managed',
     '--allow-unauthenticated',
     '--set-env-vars',
-    "FRONTEND_URL1=https://ueabreu.com, \
-     FRONTEND_URL2=https://www.ueabreu.com, \
-     FRONTEND_URL3=http://localhost:5173, \
-     BACKEND_URL=http://localhost:8080, \
-     BACKEND_URL1=https://api.ueabreu.com, \
-     SESION_SECRETKEY=SesionesUEABREU, \
-     JWT_EXPIRES_IN=1h, \
-     NODE_ENV=production, \
-     DB_HOST=dpg-d4t0ncogjchc738fucr0-a.oregon-postgres.render.com, \
-     DB_PORT=5432, \
-     DB_USER=ueabreu, \
-     DB_PASSWORD=Q2HusVQyaD4yyiSlUeXMyz5RjQFyFEYd, \
-     DB_NAME=ueabreudb"
+    'FRONTEND_URL1=https://ueabreu.com,FRONTEND_URL2=https://www.ueabreu.com,FRONTEND_URL3=http://localhost:5173,BACKEND_URL=http://localhost:8080,BACKEND_URL1=https://api.ueabreu.com,SESION_SECRETKEY=SesionesUEABREU,JWT_EXPIRES_IN=1h,NODE_ENV=production,DB_HOST=dpg-d4t0ncogjchc738fucr0-a.oregon-postgres.render.com,DB_PORT=5432,DB_USER=ueabreu,DB_PASSWORD=Q2HusVQyaD4yyiSlUeXMyz5RjQFyFEYd,DB_NAME=ueabreudb'
   ]
+
+images:
+- 'gcr.io/${PROJECT_ID}/ueabreu-backend:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY
