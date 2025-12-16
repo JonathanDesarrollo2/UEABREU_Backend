@@ -9,21 +9,21 @@ steps:
     '--region', 'us-central1',
     '--platform', 'managed',
     '--allow-unauthenticated',
-    '--set-env-vars',
-    "FRONTEND_URL1=https://ueabreu.com, \
-     FRONTEND_URL2=https://www.ueabreu.com, \
-     FRONTEND_URL3=http://localhost:5173, \
-     BACKEND_URL=http://localhost:8080, \
-     BACKEND_URL1=https://api.ueabreu.com, \
-     SESION_SECRETKEY=SesionesUEABREU, \
-     JWT_EXPIRES_IN=1h, \
-     GCS_BUCKET_NAME=ueabreu-logs-prod, \
-     NODE_ENV=production, \
-     DB_HOST=dpg-d4t0ncogjchc738fucr0-a.oregon-postgres.render.com, \
-     DB_PORT=5432, \
-     DB_USER=ueabreu, \
-     DB_PASSWORD=Q2HusVQyaD4yyiSlUeXMyz5RjQFyFEYd, \
-     DB_NAME=ueabreudb"
+    # --- Configuración de Variables de Entorno Corregida ---
+    '--set-env-vars', 'FRONTEND_URL1=https://ueabreu.com',
+    '--set-env-vars', 'FRONTEND_URL2=https://www.ueabreu.com',
+    '--set-env-vars', 'FRONTEND_URL3=http://localhost:5173',
+    '--set-env-vars', 'BACKEND_URL=http://localhost:8080',
+    '--set-env-vars', 'BACKEND_URL1=https://api.ueabreu.com',
+    '--set-env-vars', 'SESION_SECRETKEY=SesionesUEABREU',
+    '--set-env-vars', 'JWT_EXPIRES_IN=1h',
+    '--set-env-vars', 'NODE_ENV=production',
+    '--set-env-vars', 'DB_HOST=dpg-d4t0ncogjchc738fucr0-a.oregon-postgres.render.com',
+    '--set-env-vars', 'DB_PORT=5432',
+    '--set-env-vars', 'DB_USER=ueabreu',
+    '--set-env-vars', 'DB_PASSWORD=Q2HusVQyaD4yyiSlUeXMyz5RjQFyFEYd',
+    '--set-env-vars', 'DB_NAME=ueabreudb'
+    # -----------------------------------------------------
   ]
 
 images:
