@@ -1,6 +1,7 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', 'gcr.io/${PROJECT_ID}/ueabreu-backend:latest', '.']
+  # El builder de Docker sube automáticamente al usar un tag de gcr.io
 
 - name: 'gcr.io/cloud-builders/gcloud'
   args: [
