@@ -1,30 +1,13 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', 'gcr.io/${PROJECT_ID}/ueabreu-backend:latest', '.']
-
 - name: 'gcr.io/cloud-builders/gcloud'
-  args: [
-    'run', 'deploy', 'ueabreu-backend',
-    '--image', 'gcr.io/${PROJECT_ID}/ueabreu-backend:latest',
-    '--region', 'us-central1',
-    '--platform', 'managed',
-    '--allow-unauthenticated',
-    # --- Configuración de Variables de Entorno Corregida ---
-    '--set-env-vars', 'FRONTEND_URL1=https://ueabreu.com',
-    '--set-env-vars', 'FRONTEND_URL2=https://www.ueabreu.com',
-    '--set-env-vars', 'FRONTEND_URL3=http://localhost:5173',
-    '--set-env-vars', 'BACKEND_URL=http://localhost:8080',
-    '--set-env-vars', 'BACKEND_URL1=https://api.ueabreu.com',
-    '--set-env-vars', 'SESION_SECRETKEY=SesionesUEABREU',
-    '--set-env-vars', 'JWT_EXPIRES_IN=1h',
-    '--set-env-vars', 'NODE_ENV=production',
-    '--set-env-vars', 'DB_HOST=dpg-d4t0ncogjchc738fucr0-a.oregon-postgres.render.com',
-    '--set-env-vars', 'DB_PORT=5432',
-    '--set-env-vars', 'DB_USER=ueabreu',
-    '--set-env-vars', 'DB_PASSWORD=Q2HusVQyaD4yyiSlUeXMyz5RjQFyFEYd',
-    '--set-env-vars', 'DB_NAME=ueabreudb'
-    # -----------------------------------------------------
-  ]
+  args: ['run', 'deploy', 'ueabreu-backend',
+         '--image', 'gcr.io/${PROJECT_ID}/ueabreu-backend:latest',
+         '--region', 'us-central1',
+         '--platform', 'managed',
+         '--allow-unauthenticated',
+         '--set-env-vars', 'steps=valor_de_steps']
 
 images:
 - 'gcr.io/${PROJECT_ID}/ueabreu-backend:latest'
