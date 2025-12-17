@@ -95,7 +95,7 @@ RouterUser.post('/updatelogin',
 
 // Iniciar sesión
 RouterUser.post('/privateauth',
-    loginLimiter,
+    //loginLimiter,
     body('usermail')
         .notEmpty().withMessage('Es requerido ingresar el correo del usuario')
         .isEmail().withMessage('Debe ser un email válido'),
