@@ -14,42 +14,71 @@ import Student from "../database/models/student";
 export class User {
 
     //#region: Crear usuarios Nuevos post('/adduser')
-    static adduser = async (req: Request, res: Response) => {
-        try {
-            const { userpass, userrepass, ...otherFields }: typeuserlogin_full = req.body;
-            
-            const usernew = new UserLogin({
-                ...otherFields,
-                userpass: userpass // El hash se hace automáticamente con @BeforeCreate
+static adduser = async (req: Request, res: Response) => {
+    try {
+        const { userpass, userrepass, ...otherFields }: typeuserlogin_full = req.body;
+        
+        console.log('📝 Datos recibidos en adduser:', req.body);
+        console.log('🔍 Variables de entorno DB:', {
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            database: process.env.DB_NAME
+        });
+
+        const usernew = new UserLogin({
+            ...otherFields,
+            userpass: userpass
+        });
+
+        const LoginData: typeuserlogin_full = usernew.dataValues;
+        
+        // Verificar si el email ya existe
+        if (LoginData.usermail) {
+            console.log('🔍 Buscando email:', LoginData.usermail);
+            const existingEmail = await UserLogin.findOne({ 
+                where: { usermail: LoginData.usermail } 
             });
-
-            const LoginData: typeuserlogin_full = usernew.dataValues;
+            console.log('✅ Resultado búsqueda email:', existingEmail ? 'EXISTE' : 'NO EXISTE');
             
-            // Verificar si el email ya existe
-            if (LoginData.usermail) {
-                const existingEmail = await UserLogin.findOne({ where: { usermail: LoginData.usermail } });
-                if (existingEmail) {
-                    res.status(202).json({ result: false, content: [], error: [`El email ${LoginData.usermail} ya fue asignado a otro usuario`] }); 
-                    return;
-                }
+            if (existingEmail) {
+                res.status(202).json({ result: false, content: [], error: [`El email ${LoginData.usermail} ya fue asignado a otro usuario`] }); 
+                return;
             }
-
-            // Verificar si el login ya existe
-            if (LoginData.userlogin) {
-                const existingLogin = await UserLogin.findOne({ where: { userlogin: LoginData.userlogin } });
-                if (existingLogin) {
-                    res.status(202).json({ result: false, content: [], error: [`El login ${LoginData.userlogin} ya fue asignado a otro usuario`] }); 
-                    return;
-                }
-            }
-
-            await UserLogin.create(LoginData);
-            res.status(200).json({ result: true, content: [`Usuario Creado Exitosamente`], error: [] }); 
-        } catch (error) {
-            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("adduser"));
-            res.status(500).json({ result: false, content: [], error: ['Error al crear Usuario'] });
         }
-    };
+
+        console.log('🔄 Intentando crear usuario...');
+        await UserLogin.create(LoginData);
+        console.log('✅ Usuario creado exitosamente');
+        
+        res.status(200).json({ result: true, content: [`Usuario Creado Exitosamente`], error: [] }); 
+    } catch (error: any) {
+        // LOG DETALLADO DEL ERROR REAL
+        console.error('💥 ERROR REAL en adduser:');
+        console.error('Mensaje:', error.message);
+        console.error('Stack:', error.stack);
+        console.error('Nombre:', error.name);
+        
+        // Si es error de Sequelize, mostrar más detalles
+        if (error.name === 'SequelizeValidationError') {
+            console.error('Errores de validación:', error.errors.map((e: any) => ({
+                campo: e.path,
+                mensaje: e.message,
+                valor: e.value
+            })));
+        }
+        
+        if (error.name === 'SequelizeDatabaseError') {
+            console.error('Error de base de datos:', error.original);
+        }
+        
+        ErrorLog.createErrorLog(error, 'Server', getErrorLocation("adduser"));
+        res.status(500).json({ 
+            result: false, 
+            content: [], 
+            error: [`Error al crear Usuario: ${error.message}`] // ← Muestra el error real
+        });
+    }
+};
     //#endregion
 
     //#region: Verificar Contraseñas con confirmación de contraseña
