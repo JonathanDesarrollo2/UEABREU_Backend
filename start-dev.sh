@@ -21,5 +21,5 @@
 # Este es el contenido CORRECTO de start-dev.sh para Cloud Run
 set -e
 echo " 🚀 Conectado exitosamente a la Base de datos Render"
-echo " ✅ Esperando al servidor mimamaganadera.com"
+echo " ✅ Esperando al servidor ueabreu.com"
 exec npm start

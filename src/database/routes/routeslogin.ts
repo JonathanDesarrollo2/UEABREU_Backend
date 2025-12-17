@@ -29,10 +29,6 @@ RouterUser.post('/adduser'
     ,body('nivel')
         .optional()
         .isInt({ min: 1 }).withMessage('El nivel debe ser un número entero mayor a 0')
-    ,User.CheckEmailExists
-    ,User.CheckUserIDExists
-    ,User.ComparePass
-    ,validateRoutes
     ,User.adduser
 );
 
