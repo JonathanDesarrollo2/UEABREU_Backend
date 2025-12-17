@@ -6,7 +6,7 @@ dotenv.config();
 const sequelize = new Sequelize({
   database: process.env.DB_NAME || 'sistema_academico',
   username: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASS || 'postgres',
+  password: process.env.DB_PASS || 'postgres', // ⚠️ ¡Asegúrate que esta variable se llama DB_PASS en Cloud Run!
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432'),
   dialect: 'postgres',
@@ -17,6 +17,13 @@ const sequelize = new Sequelize({
     min: 0,
     acquire: 30000,
     idle: 10000
+  },
+  // 👇 AÑADE ESTA SECCIÓN PARA HABILITAR SSL (SOLUCIÓN AL ERROR)
+  dialectOptions: {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false // Necesario para bases de datos Render/Heroku
+    }
   }
 });
 
