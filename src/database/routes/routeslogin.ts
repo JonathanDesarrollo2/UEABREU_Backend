@@ -101,7 +101,7 @@ RouterUser.post('/privateauth',
         .isEmail().withMessage('Debe ser un email válido'),
     body('userpass')
         .notEmpty().withMessage('Es requerido ingresar la contraseña'),
-    validateRoutes,
+    //validateRoutes,
     User.SesionIn
 );
 
