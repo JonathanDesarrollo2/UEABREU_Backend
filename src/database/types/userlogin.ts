@@ -1,3 +1,4 @@
+// src/database/types/userlogin.ts
 import { JwtPayload } from "jsonwebtoken";
 
 export interface typeuserlogin_full {
@@ -11,6 +12,38 @@ export interface typeuserlogin_full {
     nivel?: number;
     createdAt?: Date;
     updatedAt?: Date;
+    
+    // Nuevos campos para registro de representantes
+    representativeData?: {
+        fullName: string;
+        identityCard: string;
+        address: string;
+        phone: string;
+        relationship: string;
+        parentName?: string;
+        parentIdentityCard?: string;
+        parentAddress?: string;
+        parentPhone?: string;
+        initialBalance?: number; // Puede ser positivo o negativo
+    };
+    
+    studentsData?: Array<{
+        fullName: string;
+        identityCard: string;
+        birthDate: string | Date;
+        state: string;
+        zone: string;
+        addressDescription: string;
+        phone?: string;
+        nationality: string;
+        birthCountry: string;
+        hasAllergies: boolean;
+        allergiesDescription?: string;
+        hasDiseases: boolean;
+        diseasesDescription?: string;
+        emergencyContact: string;
+        emergencyPhone: string;
+    }>;
 }
 
 export interface typeuserlogin_in {
@@ -25,6 +58,8 @@ export interface typeuserlogin_register {
     userpass: string;
     nivel?: number;
     userstatus?: boolean;
+    representativeData?: typeuserlogin_full['representativeData'];
+    studentsData?: typeuserlogin_full['studentsData'];
 }
 
 export interface typeuserlogin_update {

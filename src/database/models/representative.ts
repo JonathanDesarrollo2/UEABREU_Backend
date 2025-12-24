@@ -4,7 +4,7 @@ import {
   IsUUID, AllowNull, Length, HasMany, ForeignKey, BelongsTo,
   Scopes
 } from "sequelize-typescript";
-import { typerepresentative_full } from "../types/representative";
+import { typerepresentative_full } from "../types/representative"; // ¡CORRECCIÓN AQUÍ!
 import Student from "./student";
 import UserLogin from "./userlogin";
 import { Op, literal } from "sequelize";
@@ -32,8 +32,13 @@ import { Op, literal } from "sequelize";
   withCredit: {
     where: {
       balance: {
-        [Op.gte]: 0
+        [Op.gt]: 0
       }
+    }
+  },
+  zeroBalance: {
+    where: {
+      balance: 0
     }
   },
   orderByDebt: {
@@ -52,7 +57,7 @@ import { Op, literal } from "sequelize";
   freezeTableName: true,
   timestamps: true,
 })
-export default class Representative extends Model<typerepresentative_full> {
+export default class Representative extends Model<typerepresentative_full> { // ¡CORRECCIÓN AQUÍ!
   
   @IsUUID("all")
   @PrimaryKey
@@ -100,19 +105,26 @@ export default class Representative extends Model<typerepresentative_full> {
   @Column({ type: DataType.STRING(15) })
   declare parentPhone?: string;
 
-  // NUEVO: Saldo del representante
+  // SALDO (Positivo = Crédito, Negativo = Deuda)
   @AllowNull(false)
   @Default(0.00)
   @Column({ 
     type: DataType.DECIMAL(12, 2),
     get() {
       const value = this.getDataValue('balance');
-      return value ? parseFloat(value) : 0.00;
+      return value !== null && value !== undefined ? parseFloat(value) : 0.00;
+    },
+    set(value: number | string) {
+      if (typeof value === 'string') {
+        this.setDataValue('balance', parseFloat(value));
+      } else {
+        this.setDataValue('balance', value);
+      }
     }
   })
   declare balance?: number;
 
-  // NUEVO: Campo calculado para deuda
+  // Campo calculado: Monto de deuda (si hay)
   @Column({
     type: DataType.VIRTUAL,
     get() {
@@ -122,19 +134,38 @@ export default class Representative extends Model<typerepresentative_full> {
   })
   declare debtAmount?: number;
 
-  // NUEVO: Estado del saldo
+  // Campo calculado: Estado del saldo
   @Column({
     type: DataType.VIRTUAL,
     get() {
       const balance = this.getDataValue('balance') || 0;
-      if (balance < 0) return 'debt';
-      if (balance === 0) return 'zero';
-      return 'credit';
+      if (balance < 0) return 'debt';      // En deuda
+      if (balance === 0) return 'zero';    // Saldo cero
+      return 'credit';                     // Tiene crédito
     }
   })
   declare balanceStatus?: 'debt' | 'zero' | 'credit';
 
-  // NUEVO: Relación con usuario (opcional)
+  // Campo calculado: Formateado para mostrar
+  @Column({
+    type: DataType.VIRTUAL,
+    get() {
+      const balance = this.getDataValue('balance') || 0;
+      const formatter = new Intl.NumberFormat('es-VE', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2
+      });
+      
+      if (balance < 0) {
+        return `-${formatter.format(Math.abs(balance))}`;
+      }
+      return formatter.format(balance);
+    }
+  })
+  declare balanceFormatted?: string;
+
+  // Relación con usuario
   @AllowNull(true)
   @ForeignKey(() => UserLogin)
   @Column({ type: DataType.UUID })
@@ -147,27 +178,33 @@ export default class Representative extends Model<typerepresentative_full> {
   @HasMany(() => Student)
   declare students?: Student[];
 
-  // Método para calcular deuda mensual
-  calculateMonthlyDebt(): number {
-    const students = this.students || [];
-    const activeStudents = students.filter(s => s.status === 'active' || s.status === 'regular');
-    return activeStudents.length * 30; // 30 USD por hijo activo
+  // Métodos de utilidad - CORREGIDO
+  async addToBalance(amount: number, description?: string): Promise<{ oldBalance: number, newBalance: number }> {
+    const oldBalance = this.balance || 0;
+    const newBalance = oldBalance + amount;
+    
+    // CORRECCIÓN: Usar update con el tipo correcto
+    await (this as any).update({ balance: newBalance });
+    
+    console.log(`💰 Saldo actualizado: ${oldBalance} -> ${newBalance} (${description || 'Sin descripción'})`);
+    
+    return { oldBalance, newBalance };
   }
 
-  // Método para obtener resumen financiero
-  getFinancialSummary() {
+  async subtractFromBalance(amount: number, description?: string): Promise<{ oldBalance: number, newBalance: number }> {
+    return this.addToBalance(-amount, description);
+  }
+
+  getBalanceInfo() {
     const balance = this.balance || 0;
-    const students = this.students || [];
-    const activeStudents = students.filter(s => s.status === 'active' || s.status === 'regular');
-    
     return {
-      currentBalance: balance,
+      raw: balance,
+      formatted: this.balanceFormatted,
+      status: this.balanceStatus,
+      isInDebt: balance < 0,
+      hasCredit: balance > 0,
       debtAmount: balance < 0 ? Math.abs(balance) : 0,
-      availableCredit: balance > 0 ? balance : 0,
-      activeStudents: activeStudents.length,
-      monthlyFee: activeStudents.length * 30,
-      nextPaymentDue: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1),
-      canEnrollNewStudent: balance >= 0 // Puede inscribir si no tiene deuda
+      creditAmount: balance > 0 ? balance : 0
     };
   }
 }

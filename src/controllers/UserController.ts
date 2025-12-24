@@ -8,57 +8,207 @@ import { getErrorLocation } from "../utility/callerinfo";
 import { typeuserlogin_full, typeuserlogin_in, typeTokenData, typeuserlogin_active } from "../database/types/userlogin";
 import { generateJWT } from "../utility/genToken";
 import Student from "../database/models/student";
+import Representative from "../database/models/representative";
+import sequelize from "../database/config";
 
 //#endregion
 
 export class User {
-
-    //#region: Crear usuarios Nuevos post('/adduser')
+//#region: Crear usuarios Nuevos post('/adduser')
 static adduser = async (req: Request, res: Response) => {
+    const transaction = await sequelize.transaction();
+    
     try {
-        const { userpass, userrepass, ...otherFields }: typeuserlogin_full = req.body;
+        // CORRECCIÓN: Extraer TODOS los campos correctamente
+        const { 
+            userpass, 
+            userrepass, 
+            representativeData, 
+            studentsData, 
+            ...userFields 
+        }: typeuserlogin_full = req.body;
         
-        console.log('📝 Datos recibidos en adduser:', req.body);
-        console.log('🔍 Variables de entorno DB:', {
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            database: process.env.DB_NAME
-        });
+        console.log('📝 Datos recibidos en adduser:');
+        console.log('- userFields:', userFields);
+        console.log('- representativeData:', representativeData ? 'PRESENTE' : 'NO PRESENTE');
+        console.log('- studentsData:', studentsData ? `Array de ${studentsData.length} estudiantes` : 'NO PRESENTE');
 
-        const usernew = new UserLogin({
-            ...otherFields,
-            userpass: userpass
-        });
-
-        const LoginData: typeuserlogin_full = usernew.dataValues;
-        
         // Verificar si el email ya existe
-        if (LoginData.usermail) {
-            console.log('🔍 Buscando email:', LoginData.usermail);
+        if (userFields.usermail) {
+            console.log('🔍 Buscando email:', userFields.usermail);
             const existingEmail = await UserLogin.findOne({ 
-                where: { usermail: LoginData.usermail } 
+                where: { usermail: userFields.usermail } 
             });
-            console.log('✅ Resultado búsqueda email:', existingEmail ? 'EXISTE' : 'NO EXISTE');
             
             if (existingEmail) {
-                res.status(202).json({ result: false, content: [], error: [`El email ${LoginData.usermail} ya fue asignado a otro usuario`] }); 
+                await transaction.rollback();
+                res.status(202).json({ 
+                    result: false, 
+                    content: [], 
+                    error: [`El email ${userFields.usermail} ya fue asignado a otro usuario`] 
+                }); 
                 return;
             }
         }
 
-        console.log('🔄 Intentando crear usuario...');
-        await UserLogin.create(LoginData);
-        console.log('✅ Usuario creado exitosamente');
+        // Verificar si el login ya existe
+        if (userFields.userlogin) {
+            const existingLogin = await UserLogin.findOne({ 
+                where: { userlogin: userFields.userlogin } 
+            });
+            
+            if (existingLogin) {
+                await transaction.rollback();
+                res.status(202).json({ 
+                    result: false, 
+                    content: [], 
+                    error: [`El login ${userFields.userlogin} ya está en uso`] 
+                }); 
+                return;
+            }
+        }
+
+        // Crear el usuario
+        console.log('👤 Creando usuario...');
+        const newUser = await UserLogin.create({
+            ...userFields,
+            userpass: userpass,
+            nivel: userFields.nivel || 1, // Por defecto nivel 1
+            userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true
+        }, { transaction });
+
+        console.log('✅ Usuario creado:', newUser.id);
+        console.log('🔍 Nivel del usuario:', newUser.nivel);
+
+        // ========== CRÍTICO: Verificar si hay datos de representante ==========
+        // Si es representante (nivel 1) Y hay datos de representante
+        if (newUser.nivel === 1 && representativeData) {
+            console.log('🎯 Nivel 1 con representativeData detectado, procesando como representante...');
+            
+            if (!representativeData || !representativeData.identityCard) {
+                console.log('⚠️  No hay datos suficientes del representante');
+                // No hacemos rollback porque el usuario ya se creó
+                // Continuamos sin crear representante
+            } else {
+                // Verificar si la cédula del representante ya existe
+                console.log('🔍 Verificando cédula del representante:', representativeData.identityCard);
+                const existingRep = await Representative.findOne({ 
+                    where: { identityCard: representativeData.identityCard },
+                    transaction
+                });
+                
+                if (existingRep) {
+                    console.log('⚠️  Cédula de representante ya existe');
+                    // No hacemos rollback, solo registramos el warning
+                } else {
+                    // Crear el representante CON SALDO
+                    console.log('👨‍👩‍👧‍👦 Creando representante...');
+                    try {
+                        const newRepresentative = await Representative.create({
+                            fullName: representativeData.fullName,
+                            identityCard: representativeData.identityCard,
+                            address: representativeData.address,
+                            phone: representativeData.phone,
+                            relationship: representativeData.relationship,
+                            parentName: representativeData.parentName,
+                            parentIdentityCard: representativeData.parentIdentityCard,
+                            parentAddress: representativeData.parentAddress,
+                            parentPhone: representativeData.parentPhone,
+                            balance: representativeData.initialBalance || 0.00,
+                            userId: newUser.id
+                        }, { transaction });
+
+                        console.log(`💰 Representante creado con saldo: ${newRepresentative.balanceFormatted}`);
+                        console.log('✅ ID del representante:', newRepresentative.id);
+
+                        // ========== CREAR ESTUDIANTES ==========
+                        if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
+                            console.log(`🎓 Creando ${studentsData.length} estudiante(s)...`);
+                            let createdCount = 0;
+                            
+                            for (const studentData of studentsData) {
+                                if (!studentData.identityCard || !studentData.fullName) {
+                                    console.log('⚠️  Estudiante sin cédula o nombre, omitiendo');
+                                    continue;
+                                }
+
+                                // Verificar si la cédula del estudiante ya existe
+                                const existingStudent = await Student.findOne({
+                                    where: { identityCard: studentData.identityCard },
+                                    transaction
+                                });
+                                
+                                if (existingStudent) {
+                                    console.log(`⚠️  Cédula ${studentData.identityCard} ya registrada, omitiendo`);
+                                    continue;
+                                }
+
+                                try {
+                                    const newStudent = await Student.create({
+                                        fullName: studentData.fullName,
+                                        identityCard: studentData.identityCard,
+                                        birthDate: new Date(studentData.birthDate),
+                                        state: studentData.state,
+                                        zone: studentData.zone,
+                                        addressDescription: studentData.addressDescription,
+                                        phone: studentData.phone || '',
+                                        nationality: studentData.nationality,
+                                        birthCountry: studentData.birthCountry,
+                                        hasAllergies: studentData.hasAllergies,
+                                        allergiesDescription: studentData.allergiesDescription || '',
+                                        hasDiseases: studentData.hasDiseases,
+                                        diseasesDescription: studentData.diseasesDescription || '',
+                                        emergencyContact: studentData.emergencyContact,
+                                        emergencyPhone: studentData.emergencyPhone,
+                                        representativeId: newRepresentative.id,
+                                        userId: newUser.id,
+                                        status: 'pendiente',
+                                        admissionDate: new Date(),
+                                        initialSchoolYear: new Date().getFullYear().toString(),
+                                        currentGrade: 'Por asignar',
+                                        section: 'Por asignar'
+                                    }, { transaction });
+
+                                    createdCount++;
+                                    console.log(`✅ Estudiante ${createdCount} creado: ${newStudent.fullName}`);
+                                } catch (studentError: any) {
+                                    console.error(`💥 Error creando estudiante ${studentData.fullName}:`, studentError.message);
+                                    // Continuamos con el siguiente estudiante
+                                }
+                            }
+
+                            console.log(`📊 Total estudiantes creados: ${createdCount}/${studentsData.length}`);
+                        } else {
+                            console.log('⚠️  No hay datos de estudiantes o el array está vacío');
+                        }
+                    } catch (repError: any) {
+                        console.error('💥 Error creando representante:', repError.message);
+                        // No hacemos rollback, continuamos sin representante
+                    }
+                }
+            }
+        } else {
+            console.log('🎯 Usuario administrador o sin datos de representante - Solo cuenta creada');
+        }
+
+        // Confirmar transacción
+        await transaction.commit();
         
-        res.status(200).json({ result: true, content: [`Usuario Creado Exitosamente`], error: [] }); 
+        console.log('🎉 Proceso completado exitosamente');
+        
+        res.status(200).json({ 
+            result: true, 
+            content: [`Usuario Creado Exitosamente`], 
+            error: [] 
+        }); 
     } catch (error: any) {
-        // LOG DETALLADO DEL ERROR REAL
-        console.error('💥 ERROR REAL en adduser:');
+        // Revertir transacción en caso de error
+        await transaction.rollback();
+        
+        console.error('💥 ERROR en adduser:');
         console.error('Mensaje:', error.message);
         console.error('Stack:', error.stack);
-        console.error('Nombre:', error.name);
         
-        // Si es error de Sequelize, mostrar más detalles
         if (error.name === 'SequelizeValidationError') {
             console.error('Errores de validación:', error.errors.map((e: any) => ({
                 campo: e.path,
@@ -67,19 +217,15 @@ static adduser = async (req: Request, res: Response) => {
             })));
         }
         
-        if (error.name === 'SequelizeDatabaseError') {
-            console.error('Error de base de datos:', error.original);
-        }
-        
         ErrorLog.createErrorLog(error, 'Server', getErrorLocation("adduser"));
         res.status(500).json({ 
             result: false, 
             content: [], 
-            error: [`Error al crear Usuario: ${error.message}`] // ← Muestra el error real
+            error: [`Error al crear Usuario: ${error.message}`]
         });
     }
 };
-    //#endregion
+//#endregion
 
     //#region: Verificar Contraseñas con confirmación de contraseña
     static ComparePass = async (req: Request, res: Response, next: NextFunction) => {

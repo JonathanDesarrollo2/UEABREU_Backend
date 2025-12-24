@@ -3,17 +3,29 @@ import { typerepresentative_response } from "./representative";
 
 export type StudentStatus = 'regular' | 'repitiente' | 'condicionado';
 
+// src/database/types/student.ts
 export interface typestudent_full {
     id?: string;
     fullName?: string;
     identityCard?: string;
-    address?: string;
+    birthDate?: Date;
+    state?: string;
+    zone?: string;
+    addressDescription?: string;
     phone?: string;
+    nationality?: string;
+    birthCountry?: string;
+    hasAllergies?: boolean;
+    allergiesDescription?: string;
+    hasDiseases?: boolean;
+    diseasesDescription?: string;
+    emergencyContact?: string;
+    emergencyPhone?: string;
     admissionDate?: Date;
     initialSchoolYear?: string;
     currentGrade?: string;
     section?: string;
-    status?: StudentStatus;
+    status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo';
     representativeId?: string;
     userId?: string;
     createdAt?: Date;

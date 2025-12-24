@@ -1,3 +1,4 @@
+// src/database/models/student.ts
 import {
   Table, Column, Model, DataType, Default, PrimaryKey,
   IsUUID, AllowNull, Length, ForeignKey, BelongsTo
@@ -30,37 +31,87 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.STRING(20), unique: true })
   declare identityCard?: string;
 
-  @AllowNull(true)
-  @Column({ type: DataType.STRING(200) })
-  declare address?: string;
+  @AllowNull(false)
+  @Column({ type: DataType.DATE })
+  declare birthDate?: Date;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare nationality?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare birthCountry?: string;
+
+  // Dirección (estructurada)
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(50) })
+  declare state?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare zone?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.TEXT })
+  declare addressDescription?: string;
 
   @AllowNull(true)
   @Column({ type: DataType.STRING(15) })
   declare phone?: string;
 
-  // Información Académica
+  // Información de Salud
   @AllowNull(false)
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare hasAllergies?: boolean;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare allergiesDescription?: string;
+
+  @AllowNull(false)
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare hasDiseases?: boolean;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare diseasesDescription?: string;
+
+  // Contacto de Emergencia
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare emergencyContact?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(15) })
+  declare emergencyPhone?: string;
+
+  // Información Académica
+  @AllowNull(true)
   @Column({ type: DataType.DATE })
   declare admissionDate?: Date;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Column({ type: DataType.STRING(20) })
   declare initialSchoolYear?: string;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Column({ type: DataType.STRING(20) })
   declare currentGrade?: string;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Column({ type: DataType.STRING(10) })
   declare section?: string;
 
+  // CORRECCIÓN: Añade 'pendiente' al enum
   @AllowNull(false)
-  @Default('regular')
+  @Default('pendiente')
   @Column({ 
-    type: DataType.ENUM('regular', 'repitiente', 'condicionado')
+    type: DataType.ENUM('pendiente', 'regular', 'repitiente', 'condicionado', 'inactivo')
   })
-  declare status?: string;
+  declare status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo';
 
   // Relaciones
   @ForeignKey(() => Representative)
