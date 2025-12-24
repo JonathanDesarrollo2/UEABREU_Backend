@@ -165,7 +165,7 @@ static adduser = async (req: Request, res: Response) => {
                                         status: 'pendiente',
                                         admissionDate: new Date(),
                                         initialSchoolYear: new Date().getFullYear().toString(),
-                                        currentGrade: 'Por asignar',
+                                        currentGrade: 'En asignar',
                                         section: 'Pendiente',   // 9 caracteres (recomendado)
                                     }, { transaction });
 
