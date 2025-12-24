@@ -166,7 +166,7 @@ static adduser = async (req: Request, res: Response) => {
                                         admissionDate: new Date(),
                                         initialSchoolYear: new Date().getFullYear().toString(),
                                         currentGrade: 'Por asignar',
-                                        section: 'Por asignar'
+                                        section: 'Pendiente',   // 9 caracteres (recomendado)
                                     }, { transaction });
 
                                     createdCount++;
