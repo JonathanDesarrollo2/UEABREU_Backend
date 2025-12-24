@@ -7,7 +7,11 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test:bank": "ts-node src/bank/test-bank-connection.ts"
+    "test:bank": "ts-node src/bank/test-bank-connection.ts",
+    "migrate:dev": "ts-node src/database/run-migrate.ts", 
+    "migrate:create": "sequelize-cli migration:generate --name --typescript", 
+    "migrate:undo": "sequelize-cli db:migrate:undo", 
+    "migrate:status": "sequelize-cli db:migrate:status" 
   },
   "author": "",
   "license": "ISC",
@@ -44,6 +48,7 @@
     "@types/pdfmake": "^0.2.11",
     "@types/sharp": "^0.31.1",
     "nodemon": "^3.1.10",
+    "sequelize-cli": "^6.6.3",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3"
