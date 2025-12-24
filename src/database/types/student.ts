@@ -1,5 +1,5 @@
 import { typeuserlogin_response } from "./userlogin";
-import { typerepresentative_response } from "./representative";
+import { typerepresentative_full } from "./representative";
 
 export type StudentStatus = 'regular' | 'repitiente' | 'condicionado';
 
@@ -76,7 +76,7 @@ export interface typestudent_response {
     userId?: string;
     createdAt: Date;
     updatedAt: Date;
-    representative?: typerepresentative_response;
+    representative?: typerepresentative_full;
     user?: typeuserlogin_response;
 }
 
