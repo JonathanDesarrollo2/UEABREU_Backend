@@ -985,7 +985,7 @@ export class BalanceController {
       });
     }
   };
-
+ 
   //#region: Registrar retiro manual
   static manualWithdrawal = async (req: Request, res: Response) => {
     try {
