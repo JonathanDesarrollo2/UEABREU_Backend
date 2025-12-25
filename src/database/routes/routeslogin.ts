@@ -117,4 +117,33 @@ RouterUser.get('/statistics'
     , User.getStatistics
 );
 
+// Agregar estudiante a representante existente
+RouterUser.post('/add-student',
+    authsession,
+    body('representativeId')
+        .notEmpty().withMessage('ID del representante requerido')
+        .isUUID().withMessage('ID inválido'),
+    body('studentData.fullName')
+        .notEmpty().withMessage('Nombre del estudiante requerido'),
+    body('studentData.identityCard')
+        .notEmpty().withMessage('Cédula del estudiante requerida'),
+    body('studentData.birthDate')
+        .notEmpty().withMessage('Fecha de nacimiento requerida'),
+    validateRoutes,
+    User.addStudentToRepresentative
+);
+
+// Eliminar estudiante
+RouterUser.post('/remove-student',
+    authsession,
+    body('studentId')
+        .notEmpty().withMessage('ID del estudiante requerido')
+        .isUUID().withMessage('ID inválido'),
+    body('representativeId')
+        .notEmpty().withMessage('ID del representante requerido')
+        .isUUID().withMessage('ID inválido'),
+    validateRoutes,
+    User.removeStudent
+);
+
 export default RouterUser;

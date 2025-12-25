@@ -1,11 +1,13 @@
 // src/database/models/student.ts
 import {
   Table, Column, Model, DataType, Default, PrimaryKey,
-  IsUUID, AllowNull, Length, ForeignKey, BelongsTo
+  IsUUID, AllowNull, Length, ForeignKey, BelongsTo,
+  HasMany
 } from "sequelize-typescript";
 import { typestudent_full } from "../types/student";
 import Representative from "./representative";
 import UserLogin from "./userlogin";
+import StudentSchedule from "./StudentSchedule";
 
 @Table({
   tableName: 'student',
@@ -129,4 +131,25 @@ export default class Student extends Model<typestudent_full> {
 
   @BelongsTo(() => UserLogin)
   declare user?: UserLogin;
+
+  // En tu modelo Student.ts existente, agrega estos campos:
+@AllowNull(true)
+@Column({ type: DataType.TEXT })
+declare comment1?: string;
+
+@AllowNull(true)
+@Column({ type: DataType.TEXT })
+declare comment2?: string;
+
+@AllowNull(true)
+@Column({ type: DataType.TEXT })
+declare comment3?: string;
+
+@AllowNull(true)
+@Column({ type: DataType.STRING(50) })
+declare class?: string; // Para agrupación administrativa
+
+// Y la relación con StudentSchedule
+@HasMany(() => StudentSchedule)
+declare studentSchedules?: StudentSchedule[];
 }
