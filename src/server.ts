@@ -12,6 +12,7 @@ import { getErrorLocation } from "./utility/callerinfo";
 // Importar rutas
 import BankRoutes from "./bank/routes/bank-routes";
 import RouterUser from "./database/routes/routeslogin";
+import AcademicRouter from "./database/routes/academic-routes";
 // import NotificationRoutes from "../bank/routes/notification-routes"; // COMENTADO POR AHORA
 
 dotenv.config();
@@ -54,6 +55,8 @@ server.use('/api/bank', BankRoutes);
 
 // Rutas Privadas (requieren autenticación)
 server.use('/api/private/user', RouterUser);
+
+server.use('/api/private/academic', AcademicRouter);
 
 // Health Check y ruta raíz
 server.get('/api/', (req, res) => {
