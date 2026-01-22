@@ -33,6 +33,7 @@ RouterUser.post('/adduser'
 );
 
 // Lista paginada de usuarios
+// En tus rutas, actualiza la validación para listpag:
 RouterUser.get('/listpag',
     authsession,
     query('page')
@@ -50,6 +51,10 @@ RouterUser.get('/listpag',
     query('DeBus')
         .optional()
         .isString().withMessage('El parámetro de búsqueda debe ser un texto'),
+    query('nivelFilter')
+        .optional()
+        .isString().withMessage('El filtro de nivel debe ser un texto')
+        .isIn(['all', '1', '2']).withMessage('El filtro de nivel debe ser: all, 1 o 2'),
     validateRoutes,
     User.getPaginatedlogin
 );
