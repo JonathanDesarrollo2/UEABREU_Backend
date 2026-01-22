@@ -516,8 +516,11 @@ static updatelogin = async (req: Request, res: Response) => {
 };
     //#endregion
     
-    //#region: Lista de Usuarios Paginados get('/listpag')
-    static async getPaginatedlogin(req: Request, res: Response) {
+   //#region: Lista de Usuarios Paginados get('/listpag')
+static async getPaginatedlogin(req: Request, res: Response) {
+    console.log('🔍 INICIANDO getPaginatedlogin');
+    console.log('📥 Query params recibidos:', req.query);
+    
     try {
         type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
         type OrderDirection = 'ASC' | 'DESC';
@@ -536,6 +539,10 @@ static updatelogin = async (req: Request, res: Response) => {
         const nivelFilter = req.query.nivelFilter as string || 'all';
         const offset = (page - 1) * limit;
 
+        console.log('📊 Parámetros procesados:', { 
+            page, limit, idBus, DeBus, nivelFilter, offset 
+        });
+
         const fieldConfig: FieldConfig = {
             1: { field: 'usermail', orderDirection: 'ASC' },
             2: { field: 'userlogin', orderDirection: 'ASC' },
@@ -547,6 +554,8 @@ static updatelogin = async (req: Request, res: Response) => {
             field: 'createdAt' as const, 
             orderDirection: 'DESC' as OrderDirection 
         };
+
+        console.log('⚙️ Configuración de orden:', config);
 
         const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
             limit,
@@ -569,6 +578,8 @@ static updatelogin = async (req: Request, res: Response) => {
             ]
         };
 
+        console.log('🔄 Opciones iniciales de consulta:', JSON.stringify(queryOptions, null, 2));
+
         queryOptions.order = [[config.field, config.orderDirection]];
         
         // Construir condiciones de búsqueda
@@ -577,10 +588,12 @@ static updatelogin = async (req: Request, res: Response) => {
         // Filtrar por nivel si no es 'all'
         if (nivelFilter !== 'all') {
             whereConditions.nivel = nivelFilter;
+            console.log('🎯 Filtro por nivel aplicado:', nivelFilter);
         }
         
         // Agregar búsqueda por texto
         if (DeBus) {
+            console.log('🔎 Búsqueda por texto activada:', DeBus);
             whereConditions[Op.or] = [
                 { usermail: { [Op.iLike]: `%${DeBus}%` } },
                 { userlogin: { [Op.iLike]: `%${DeBus}%` } },
@@ -589,6 +602,7 @@ static updatelogin = async (req: Request, res: Response) => {
             
             // Para representantes, también buscar en representante y cédula
             if (nivelFilter === '1' || nivelFilter === 'all') {
+                console.log('👥 Aplicando búsqueda en representantes...');
                 const repCondition = {
                     model: Representative,
                     as: 'representative',
@@ -608,16 +622,26 @@ static updatelogin = async (req: Request, res: Response) => {
                 const repIndex = existingInclude.findIndex((inc: any) => inc.as === 'representative');
                 if (repIndex !== -1) {
                     existingInclude[repIndex] = repCondition;
+                    console.log('✅ Condición de representante actualizada');
                 }
             }
         }
         
         if (Object.keys(whereConditions).length > 0) {
             queryOptions.where = whereConditions;
+            console.log('📍 Condiciones WHERE aplicadas:', whereConditions);
         }
+
+        console.log('🚀 Ejecutando consulta con opciones finales...');
+        console.log('📋 QueryOptions final:', JSON.stringify(queryOptions, null, 2));
         
         const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
         
+        console.log('✅ Consulta exitosa:', {
+            registrosEncontrados: count,
+            registrosDevueltos: rows.length
+        });
+
         res.status(200).json({
             result: true,
             content: rows,
@@ -629,7 +653,23 @@ static updatelogin = async (req: Request, res: Response) => {
             error: []
         });
 
-    } catch (error) {
+    } catch (error: any) {
+        console.error('❌ ERROR CRÍTICO en getPaginatedlogin:');
+        console.error('📛 Mensaje:', error.message);
+        console.error('🔧 Stack:', error.stack);
+        console.error('📂 Detalles adicionales:', error);
+        
+        // También verificar si es error de Sequelize
+        if (error.name === 'SequelizeDatabaseError') {
+            console.error('🗄️ Error de base de datos:', error.parent?.message);
+        }
+        if (error.name === 'SequelizeValidationError') {
+            console.error('✍️ Error de validación:', error.errors?.map((e: any) => e.message));
+        }
+        if (error.name === 'SequelizeEagerLoadingError') {
+            console.error('🔗 Error en asociaciones (includes):', error.message);
+        }
+        
         ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
         res.status(500).json({ 
             result: false, 
@@ -638,7 +678,7 @@ static updatelogin = async (req: Request, res: Response) => {
         });
     }
 }
-    //#endregion
+//#endregion
 
     //#region: Iniciar Sesion post('/privateauth')
     static SesionIn = async (req: Request, res: Response) => {
