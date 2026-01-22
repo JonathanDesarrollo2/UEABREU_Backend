@@ -516,10 +516,10 @@ static updatelogin = async (req: Request, res: Response) => {
 };
     //#endregion
     
-   //#region: Lista de Usuarios Paginados get('/listpag')
+//#region: Lista de Usuarios Paginados get('/listpag')
 static async getPaginatedlogin(req: Request, res: Response) {
-    console.log('🔍 INICIANDO getPaginatedlogin');
-    console.log('📥 Query params recibidos:', req.query);
+    console.log('🔍 [DEBUG] INICIANDO getPaginatedlogin');
+    console.log('📥 [DEBUG] Query params recibidos:', JSON.stringify(req.query, null, 2));
     
     try {
         type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
@@ -539,7 +539,7 @@ static async getPaginatedlogin(req: Request, res: Response) {
         const nivelFilter = req.query.nivelFilter as string || 'all';
         const offset = (page - 1) * limit;
 
-        console.log('📊 Parámetros procesados:', { 
+        console.log('📊 [DEBUG] Parámetros procesados:', { 
             page, limit, idBus, DeBus, nivelFilter, offset 
         });
 
@@ -555,8 +555,51 @@ static async getPaginatedlogin(req: Request, res: Response) {
             orderDirection: 'DESC' as OrderDirection 
         };
 
-        console.log('⚙️ Configuración de orden:', config);
+        console.log('⚙️ [DEBUG] Configuración de orden:', config);
 
+        // PRIMERO: Prueba simple de la asociación
+        console.log('🧪 [DEBUG] Probando asociación UserLogin->Representative...');
+        try {
+            const testUser = await UserLogin.findOne({
+                where: { nivel: 1 },
+                include: [{ 
+                    model: Representative, 
+                    as: 'representative',
+                    required: false 
+                }]
+            });
+            
+            if (testUser) {
+                console.log('✅ [DEBUG] Usuario nivel 1 encontrado:', testUser.userlogin);
+                console.log('✅ [DEBUG] Tiene representante?:', testUser.representative ? 'Sí' : 'No');
+                console.log('✅ [DEBUG] Datos del representante:', testUser.representative ? 
+                    JSON.stringify(testUser.representative, null, 2) : 'null');
+            } else {
+                console.log('⚠️ [DEBUG] No hay usuarios nivel 1 para probar');
+            }
+            
+            // También probar con administrativo
+            const testAdmin = await UserLogin.findOne({
+                where: { nivel: 2 },
+                include: [{ 
+                    model: Representative, 
+                    as: 'representative',
+                    required: false 
+                }]
+            });
+            
+            if (testAdmin) {
+                console.log('✅ [DEBUG] Administrativo encontrado:', testAdmin.userlogin);
+                console.log('✅ [DEBUG] Representante (debe ser null):', testAdmin.representative);
+            }
+        } catch (associationError: any) {
+            console.error('❌ [DEBUG] ERROR en prueba de asociación:', associationError.message);
+            console.error('❌ [DEBUG] Detalles:', associationError);
+        }
+
+        // Construir opciones de consulta PRINCIPAL
+        console.log('🔄 [DEBUG] Construyendo opciones de consulta principal...');
+        
         const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
             limit,
             offset,
@@ -578,9 +621,15 @@ static async getPaginatedlogin(req: Request, res: Response) {
             ]
         };
 
-        console.log('🔄 Opciones iniciales de consulta:', JSON.stringify(queryOptions, null, 2));
+        console.log('⚙️ [DEBUG] Opciones iniciales de consulta:', {
+            limit: queryOptions.limit,
+            offset: queryOptions.offset,
+            includeCount: Array.isArray(queryOptions.include) ? queryOptions.include.length : (queryOptions.include ? 1 : 0),
+            includeDetails: queryOptions.include ? JSON.stringify(queryOptions.include, null, 2) : 'none'
+        });
 
         queryOptions.order = [[config.field, config.orderDirection]];
+        console.log('📋 [DEBUG] Orden aplicado:', queryOptions.order);
         
         // Construir condiciones de búsqueda
         const whereConditions: any = {};
@@ -588,12 +637,12 @@ static async getPaginatedlogin(req: Request, res: Response) {
         // Filtrar por nivel si no es 'all'
         if (nivelFilter !== 'all') {
             whereConditions.nivel = nivelFilter;
-            console.log('🎯 Filtro por nivel aplicado:', nivelFilter);
+            console.log('🎯 [DEBUG] Filtro por nivel aplicado:', nivelFilter);
         }
         
         // Agregar búsqueda por texto
         if (DeBus) {
-            console.log('🔎 Búsqueda por texto activada:', DeBus);
+            console.log('🔎 [DEBUG] Búsqueda por texto activada:', DeBus);
             whereConditions[Op.or] = [
                 { usermail: { [Op.iLike]: `%${DeBus}%` } },
                 { userlogin: { [Op.iLike]: `%${DeBus}%` } },
@@ -602,7 +651,7 @@ static async getPaginatedlogin(req: Request, res: Response) {
             
             // Para representantes, también buscar en representante y cédula
             if (nivelFilter === '1' || nivelFilter === 'all') {
-                console.log('👥 Aplicando búsqueda en representantes...');
+                console.log('👥 [DEBUG] Aplicando búsqueda en representantes...');
                 const repCondition = {
                     model: Representative,
                     as: 'representative',
@@ -622,25 +671,45 @@ static async getPaginatedlogin(req: Request, res: Response) {
                 const repIndex = existingInclude.findIndex((inc: any) => inc.as === 'representative');
                 if (repIndex !== -1) {
                     existingInclude[repIndex] = repCondition;
-                    console.log('✅ Condición de representante actualizada');
+                    console.log('✅ [DEBUG] Condición de representante actualizada para búsqueda');
+                } else {
+                    console.log('⚠️ [DEBUG] No se encontró include de representative para actualizar');
                 }
             }
         }
         
         if (Object.keys(whereConditions).length > 0) {
             queryOptions.where = whereConditions;
-            console.log('📍 Condiciones WHERE aplicadas:', whereConditions);
+            console.log('📍 [DEBUG] Condiciones WHERE aplicadas:', JSON.stringify(whereConditions, null, 2));
         }
 
-        console.log('🚀 Ejecutando consulta con opciones finales...');
-        console.log('📋 QueryOptions final:', JSON.stringify(queryOptions, null, 2));
+        console.log('🚀 [DEBUG] Ejecutando consulta principal...');
+        console.log('📋 [DEBUG] QueryOptions final:', JSON.stringify({
+            limit: queryOptions.limit,
+            offset: queryOptions.offset,
+            where: queryOptions.where,
+            order: queryOptions.order,
+            includeCount: Array.isArray(queryOptions.include) ? queryOptions.include.length : (queryOptions.include ? 1 : 0)
+        }, null, 2));
         
+        // Ejecutar la consulta principal
         const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
         
-        console.log('✅ Consulta exitosa:', {
-            registrosEncontrados: count,
-            registrosDevueltos: rows.length
-        });
+        console.log('✅ [DEBUG] Consulta principal exitosa:');
+        console.log('   📊 Registros totales encontrados:', count);
+        console.log('   📄 Registros devueltos en esta página:', rows.length);
+        
+        if (rows.length > 0) {
+            console.log('   👤 Primer usuario en resultados:', rows[0].userlogin);
+            console.log('   📧 Email del primer usuario:', rows[0].usermail);
+            console.log('   🎯 Nivel del primer usuario:', rows[0].nivel);
+            console.log('   👥 Tiene representante?:', rows[0].representative ? 'Sí' : 'No');
+            
+            if (rows[0].representative) {
+                console.log('   💰 Saldo del representante:', rows[0].representative.balanceFormatted);
+                console.log('   👶 Estudiantes asociados:', rows[0].representative.students?.length || 0);
+            }
+        }
 
         res.status(200).json({
             result: true,
@@ -654,23 +723,40 @@ static async getPaginatedlogin(req: Request, res: Response) {
         });
 
     } catch (error: any) {
-        console.error('❌ ERROR CRÍTICO en getPaginatedlogin:');
-        console.error('📛 Mensaje:', error.message);
-        console.error('🔧 Stack:', error.stack);
-        console.error('📂 Detalles adicionales:', error);
+        console.error('❌ [DEBUG] ERROR CRÍTICO en getPaginatedlogin:');
+        console.error('📛 [DEBUG] Nombre del error:', error.name);
+        console.error('💬 [DEBUG] Mensaje:', error.message);
+        console.error('🔗 [DEBUG] Stack completo:', error.stack);
         
-        // También verificar si es error de Sequelize
+        // Detalles específicos por tipo de error
         if (error.name === 'SequelizeDatabaseError') {
-            console.error('🗄️ Error de base de datos:', error.parent?.message);
-        }
-        if (error.name === 'SequelizeValidationError') {
-            console.error('✍️ Error de validación:', error.errors?.map((e: any) => e.message));
-        }
-        if (error.name === 'SequelizeEagerLoadingError') {
-            console.error('🔗 Error en asociaciones (includes):', error.message);
+            console.error('🗄️ [DEBUG] Error de base de datos:', error.parent?.message);
+            console.error('🗄️ [DEBUG] SQL:', error.parent?.sql);
         }
         
+        if (error.name === 'SequelizeValidationError') {
+            console.error('✍️ [DEBUG] Error de validación:');
+            error.errors?.forEach((e: any, i: number) => {
+                console.error(`   ${i+1}. Campo: ${e.path}, Valor: ${e.value}, Mensaje: ${e.message}`);
+            });
+        }
+        
+        if (error.name === 'SequelizeEagerLoadingError') {
+            console.error('🔗 [DEBUG] Error en asociaciones (includes):', error.message);
+            console.error('🔗 [DEBUG] Modelo asociado:', (error as any).model?.name || 'Desconocido');
+            console.error('🔗 [DEBUG] Asociación intentada:', (error as any).association?.associationType || 'Desconocida');
+        }
+        
+        if (error.name === 'SequelizeForeignKeyConstraintError') {
+            console.error('🔗 [DEBUG] Error de clave foránea:', error.parent?.detail);
+            console.error('🔗 [DEBUG] Tabla:', error.parent?.table);
+        }
+        
+        console.error('📂 [DEBUG] Error objeto completo:', JSON.stringify(error, null, 2));
+
+        // Registrar en ErrorLog
         ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
+        
         res.status(500).json({ 
             result: false, 
             content: [], 

@@ -5,6 +5,7 @@ import {
 import { typeuserlogin_full } from "../types/userlogin";
 import Student from "./student";
 import bcrypt from 'bcrypt';
+import Representative from "./representative";
 
 @Table({
   tableName: 'userlogin',
@@ -97,4 +98,11 @@ export default class UserLogin extends Model<typeuserlogin_full> {
   // Relación con estudiantes
   @HasOne(() => Student)
   declare student?: Student;
+
+  @HasOne(() => Representative, {
+  foreignKey: 'userId',       // Campo en la tabla Representative
+  as: 'representative',       // Nombre de la relación
+  constraints: false          // IMPORTANTE: Permite que no todos los UserLogin tengan Representative
+})
+declare representative?: Representative;
 }
