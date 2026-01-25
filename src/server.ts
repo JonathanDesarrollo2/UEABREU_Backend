@@ -13,6 +13,7 @@ import { getErrorLocation } from "./utility/callerinfo";
 import BankRoutes from "./bank/routes/bank-routes";
 import RouterUser from "./database/routes/routeslogin";
 import AcademicRouter from "./database/routes/academic-routes";
+import BalanceRoutes from "./database/routes/balance-routes"; // <-- AGREGAR ESTA LÍNEA
 // import NotificationRoutes from "../bank/routes/notification-routes"; // COMENTADO POR AHORA
 
 dotenv.config();
@@ -58,6 +59,8 @@ server.use('/api/private/user', RouterUser);
 
 server.use('/api/private/academic', AcademicRouter);
 
+server.use('/api/private/balance', BalanceRoutes); // <-- AGREGAR ESTA LÍNEA
+
 // Health Check y ruta raíz
 server.get('/api/', (req, res) => {
     res.json({ 
@@ -67,7 +70,8 @@ server.get('/api/', (req, res) => {
         environment: process.env.NODE_ENV || 'development',
         services: {
             academic: 'Operational',
-            bank: 'Available at /api/bank'
+            bank: 'Available at /api/bank',
+            balance: 'Available at /api/private/balance' // <-- AGREGAR ESTE
         },
         endpoints: {
             health: '/api/',
@@ -76,7 +80,11 @@ server.get('/api/', (req, res) => {
             bank_test: '/api/bank/test-connection',
             bank_logon: '/api/bank/logon',
             bank_validate: '/api/bank/validate-p2p',
-            cors_test: '/api/cors-test'
+            cors_test: '/api/cors-test',
+            // Nuevos endpoints
+            balance_representatives: '/api/private/balance/representatives',
+            balance_transactions: '/api/private/balance/representative/:id/transactions',
+            balance_statistics: '/api/private/balance/statistics/financial'
         }
     });
 });
@@ -126,6 +134,9 @@ server.use('*', (req, res) => {
             root: '/',
             api: '/api/',
             bank: '/api/bank/*',
+            balance: '/api/private/balance/*', // <-- AGREGAR ESTE
+            user: '/api/private/user/*',
+            academic: '/api/private/academic/*',
             cors_test: '/api/cors-test'
         }
     });

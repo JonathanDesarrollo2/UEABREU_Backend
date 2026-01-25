@@ -1072,4 +1072,35 @@ export class BalanceController {
       });
     }
   };
+  //#region: Obtener transacciones recientes (para el dashboard)
+static getRecentTransactions = async (req: Request, res: Response) => {
+  try {
+    const { limit = 10 } = req.query;
+
+    const transactions = await Transaction.findAll({
+      limit: Number(limit),
+      order: [['createdAt', 'DESC']],
+      include: [{
+        model: Representative,
+        as: 'representative',
+        attributes: ['id', 'fullName', 'identityCard']
+      }],
+      attributes: ['id', 'type', 'amount', 'description', 'paymentMethod', 'reference', 'status', 'createdAt']
+    });
+
+    res.status(200).json({
+      result: true,
+      content: transactions,
+      error: []
+    });
+  } catch (error) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
+    res.status(500).json({ 
+      result: false, 
+      content: [], 
+      error: ['Error al obtener transacciones recientes'] 
+    });
+  }
+};
+//#endregion
 }

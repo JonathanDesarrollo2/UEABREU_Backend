@@ -150,5 +150,15 @@ RouterUser.post('/remove-student',
     validateRoutes,
     User.removeStudent
 );
+// Lista de estudiantes (para dashboard)
+RouterUser.get('/students/list',
+  authsession,
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 500 }).toInt(),
+  query('status').optional().isIn(['pendiente', 'regular', 'repitiente', 'condicionado', 'inactivo']),
+  query('search').optional().isString(),
+  validateRoutes,
+  User.listStudents
+);
 
 export default RouterUser;
