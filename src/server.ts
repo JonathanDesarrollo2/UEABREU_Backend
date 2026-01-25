@@ -59,7 +59,7 @@ server.use('/api/private/user', RouterUser);
 
 server.use('/api/private/academic', AcademicRouter);
 
-server.use('/api/private/balance', BalanceRoutes); // <-- AGREGAR ESTA LÍNEA
+server.use('/api/private/balance', BalanceRoutes); // <-- AGREGAR ESTA LÍNEA// En server.ts
 
 // Health Check y ruta raíz
 server.get('/api/', (req, res) => {

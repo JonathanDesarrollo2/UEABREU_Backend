@@ -5,6 +5,7 @@ import { validateRoutes } from "../../middleware/validateRoutes";
 import { BalanceController } from "../../controllers/balance-controller";
 import { authsession } from "../../utility/authsession";
 import { PaymentMethod, TransactionType, TransactionStatus } from "../../database/models/transaction";
+import { User } from "../../controllers/UserController";
 
 const router = Router();
 
@@ -107,6 +108,11 @@ router.get('/check-payment',
   BalanceController.checkPaymentExists
 );
 
+router.get('/statistics',
+  authsession,
+  User.getUserStatistics
+);
+
 router.get('/transaction-status',
   authsession,
   query('reference').notEmpty().withMessage('La referencia es requerida'),
@@ -122,12 +128,14 @@ router.get('/statistics/financial',
   authsession,
   BalanceController.getFinancialStatistics
 );
-// Transacciones recientes (para dashboard)
+
+// Transacciones recientes (para dashboard) - CAMBIADO
 router.get('/transactions/recent',
   authsession,
   query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
   validateRoutes,
   BalanceController.getRecentTransactions
 );
+
 
 export default router;

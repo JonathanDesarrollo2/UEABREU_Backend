@@ -10,6 +10,7 @@ import Student from "../database/models/student";
 import Representative from "../database/models/representative";
 import sequelize from "../database/config";
 import { Transaction } from "sequelize";
+import Teacher from "../database/models/teacher";
 
 //#endregion
 
@@ -997,4 +998,38 @@ static listStudents = async (req: Request, res: Response) => {
   }
 };
 //#endregion
+  static getUserStatistics = async (req: Request, res: Response) => {
+    try {
+      const totalUsers = await UserLogin.count();
+      const totalStudents = await Student.count();
+      const totalTeachers = await Teacher.count();
+      const totalRepresentatives = await Representative.count();
+      
+      res.status(200).json({
+        result: true,
+        content: {
+          users: {
+            total: totalUsers,
+            students: totalStudents,
+            teachers: totalTeachers,
+            representatives: totalRepresentatives
+          },
+          summary: {
+            totalUsers,
+            totalStudents,
+            totalTeachers,
+            totalRepresentatives
+          }
+        },
+        error: []
+      });
+    } catch (error) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getUserStatistics"));
+      res.status(500).json({ 
+        result: false, 
+        content: [], 
+        error: ['Error al obtener estadísticas'] 
+      });
+    }
+  };
 }
