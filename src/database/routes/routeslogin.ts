@@ -9,7 +9,6 @@ const RouterUser = Router();
 
 // Crear usuario
 RouterUser.post('/adduser' 
-
     ,body('usermail')
         .notEmpty().withMessage('Es requerido ingresar el email del Usuario')
         .isEmail().withMessage('Es requerido ingresar un Email Valido')
@@ -33,7 +32,6 @@ RouterUser.post('/adduser'
 );
 
 // Lista paginada de usuarios
-// En tus rutas, actualiza la validación para listpag:
 RouterUser.get('/listpag',
     authsession,
     query('page')
@@ -151,5 +149,21 @@ RouterUser.post('/remove-student',
     User.removeStudent
 );
 
+// Lista de estudiantes - RUTA NUEVA AGREGADA
+RouterUser.get('/students/list',
+    authsession,
+    query('page').optional().isNumeric().toInt(),
+    query('limit').optional().isNumeric().toInt(),
+    query('status').optional().isString(),
+    query('search').optional().isString(),
+    validateRoutes,
+    User.listStudents
+);
+
+// Estadísticas de usuarios (para dashboard)
+RouterUser.get('/user-statistics',
+    authsession,
+    User.getUserStatistics
+);
 
 export default RouterUser;

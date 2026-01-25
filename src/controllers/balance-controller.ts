@@ -1,1106 +1,783 @@
-import type { Request, Response, NextFunction } from "express";
+// src/controllers/balance-controller.ts
+import type { Request, Response } from "express";
 import Representative from "../database/models/representative";
-import Transaction, { TransactionType, PaymentMethod, TransactionStatus } from "../database/models/transaction";
 import Student from "../database/models/student";
+import Transaction from "../database/models/transaction";
+import UserLogin from "../database/models/userlogin";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
-import { Sequelize, Op, fn, col, literal } from "sequelize";
-import { TransactionValidator } from "../utility/transaction-validator";
+import sequelize from "../database/config";
+import { Op, fn, col, literal } from "sequelize";
 
 export class BalanceController {
   
-  //#region: Obtener balance de un representante
-  static getBalance = async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      
-      const representative = await Representative.findByPk(id, {
-        attributes: ['id', 'fullName', 'identityCard', 'phone', 'balance'],
-        include: [
-          {
-            model: Student,
-            as: 'students',
-            attributes: ['id', 'fullName', 'status']
-          },
-          {
-            model: Transaction,
-            as: 'transactions',
-            limit: 10,
-            order: [['createdAt', 'DESC']],
-            attributes: ['id', 'type', 'amount', 'description', 'paymentMethod', 'reference', 'status', 'createdAt']
-          }
-        ]
-      });
+    // Listar representantes con filtros
+    static listRepresentatives = async (req: Request, res: Response) => {
+        try {
+            const {
+                page = 1,
+                limit = 10,
+                fullName,
+                identityCard,
+                relationship,
+                balanceStatus,
+                minBalance,
+                maxBalance,
+                hasDebt,
+                hasCredit,
+                hasStudents,
+                activeOnly = true,
+                search,
+                sortBy = 'fullName',
+                sortOrder = 'asc'
+            } = req.query;
 
-      if (!representative) {
-        return res.status(404).json({ 
-          result: false, 
-          content: [], 
-          error: ['Representante no encontrado'] 
-        });
-      }
-
-      // Calcular resumen financiero
-      const financialSummary = (representative as any).getFinancialSummary ? 
-        (representative as any).getFinancialSummary() : 
-        {
-          currentBalance: representative.balance || 0,
-          debtAmount: (representative.balance || 0) < 0 ? Math.abs(representative.balance || 0) : 0,
-          availableCredit: (representative.balance || 0) > 0 ? (representative.balance || 0) : 0,
-          activeStudents: 0,
-          monthlyFee: 0,
-          nextPaymentDue: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1),
-          canEnrollNewStudent: (representative.balance || 0) >= 0
-        };
-
-      res.status(200).json({ 
-        result: true, 
-        content: {
-          ...representative.toJSON(),
-          financialSummary
-        }, 
-        error: [] 
-      });
-
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getBalance"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al obtener el balance'] 
-      });
-    }
-  };
-
-  //#region: Listar representantes con filtros avanzados
-  static listRepresentatives = async (req: Request, res: Response) => {
-    try {
-      const { 
-        page = 1, 
-        limit = 20,
-        fullName,
-        identityCard,
-        relationship,
-        balanceStatus,
-        minBalance,
-        maxBalance,
-        hasDebt,
-        hasCredit,
-        hasStudents,
-        activeOnly = true,
-        search,
-        sortBy = 'fullName',
-        sortOrder = 'asc'
-      } = req.query;
-
-      const offset = (Number(page) - 1) * Number(limit);
-      
-      // Validar sortOrder
-      const sortOrderStr = typeof sortOrder === 'string' ? sortOrder : 'asc';
-      const sortOrderUpper = sortOrderStr.toUpperCase();
-
-      // Construir filtros
-      const where: any = {};
-
-      // Búsqueda por texto
-      if (search && typeof search === 'string') {
-        where[Op.or] = [
-          { fullName: { [Op.iLike]: `%${search}%` } },
-          { identityCard: { [Op.iLike]: `%${search}%` } },
-          { phone: { [Op.iLike]: `%${search}%` } }
-        ];
-      }
-
-      if (fullName && typeof fullName === 'string') {
-        where.fullName = { [Op.iLike]: `%${fullName}%` };
-      }
-
-      if (identityCard && typeof identityCard === 'string') {
-        where.identityCard = { [Op.iLike]: `%${identityCard}%` };
-      }
-
-      if (relationship && typeof relationship === 'string') {
-        where.relationship = relationship;
-      }
-
-      // Filtros por saldo
-      if (balanceStatus === 'debt') {
-        where.balance = { [Op.lt]: 0 };
-      } else if (balanceStatus === 'credit') {
-        where.balance = { [Op.gt]: 0 };
-      } else if (balanceStatus === 'zero') {
-        where.balance = 0;
-      }
-
-      if (minBalance !== undefined) {
-        where.balance = { ...where.balance, [Op.gte]: Number(minBalance) };
-      }
-
-      if (maxBalance !== undefined) {
-        where.balance = { ...where.balance, [Op.lte]: Number(maxBalance) };
-      }
-
-      if (hasDebt === 'true') {
-        where.balance = { [Op.lt]: 0 };
-      }
-
-      if (hasCredit === 'true') {
-        where.balance = { [Op.gt]: 0 };
-      }
-
-      // Construir ordenamiento
-      let order: any[] = [];
-      const sortByStr = typeof sortBy === 'string' ? sortBy : 'fullName';
-      
-      switch (sortByStr) {
-        case 'balance':
-          order = [['balance', sortOrderUpper]];
-          break;
-        case 'debtAmount':
-          order = [
-            [literal('ABS(CASE WHEN balance < 0 THEN balance ELSE 0 END)'), 'DESC']
-          ];
-          break;
-        case 'fullName':
-          order = [['fullName', sortOrderUpper]];
-          break;
-        case 'createdAt':
-          order = [['createdAt', sortOrderUpper]];
-          break;
-        default:
-          order = [['fullName', 'ASC']];
-      }
-
-      // Incluir estudiantes si se solicita
-      const include: any[] = [];
-      
-      if (hasStudents === 'true') {
-        include.push({
-          model: Student,
-          as: 'students',
-          required: true,
-          attributes: []
-        });
-      } else if (hasStudents === 'false') {
-        include.push({
-          model: Student,
-          as: 'students',
-          required: false,
-          where: {
-            id: { [Op.is]: null }
-          },
-          attributes: []
-        });
-      } else {
-        include.push({
-          model: Student,
-          as: 'students',
-          required: false,
-          attributes: ['id', 'fullName', 'status']
-        });
-      }
-
-      // Ejecutar consulta
-      const { count, rows: representatives } = await Representative.findAndCountAll({
-        where,
-        limit: Number(limit),
-        offset,
-        order,
-        include,
-        distinct: true
-      });
-
-      // Calcular estadísticas
-      const allRepresentatives = await Representative.findAll({
-        attributes: [
-          [fn('COUNT', col('id')), 'total'],
-          [fn('SUM', literal('CASE WHEN balance < 0 THEN balance ELSE 0 END')), 'totalDebt'],
-          [fn('SUM', literal('CASE WHEN balance > 0 THEN balance ELSE 0 END')), 'totalCredit'],
-          [fn('AVG', col('balance')), 'averageBalance'],
-          [fn('COUNT', literal('CASE WHEN balance < 0 THEN 1 END')), 'withDebt'],
-          [fn('COUNT', literal('CASE WHEN balance > 0 THEN 1 END')), 'withCredit']
-        ],
-        raw: true
-      });
-
-      const stats = (allRepresentatives[0] as any) || {
-        total: 0,
-        totalDebt: 0,
-        totalCredit: 0,
-        averageBalance: 0,
-        withDebt: 0,
-        withCredit: 0
-      };
-
-      // Formatear respuesta
-      const formattedRepresentatives = representatives.map(rep => {
-        const repData = rep.toJSON();
-        const students = (repData as any).students || [];
-        const activeStudents = students.filter((s: any) => 
-          s.status === 'active' || s.status === 'regular'
-        );
-        
-        const balance = repData.balance || 0;
-        const debtAmount = balance < 0 ? Math.abs(balance) : 0;
-        const balanceStatus = balance < 0 ? 'debt' : balance === 0 ? 'zero' : 'credit';
-
-        return {
-          ...repData,
-          debtAmount,
-          balanceStatus,
-          financialSummary: {
-            currentBalance: balance,
-            debtAmount,
-            availableCredit: balance > 0 ? balance : 0,
-            activeStudents: activeStudents.length,
-            monthlyFee: activeStudents.length * 30,
-            nextPaymentDue: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1),
-            canEnrollNewStudent: balance >= 0
-          }
-        };
-      });
-
-      const totalNum = Number(stats.total || 0);
-      const withDebtNum = Number(stats.withDebt || 0);
-      const withCreditNum = Number(stats.withCredit || 0);
-
-      const response = {
-        representatives: formattedRepresentatives,
-        total: count,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(count / Number(limit)),
-        summary: {
-          totalRepresentatives: totalNum,
-          totalBalance: (Number(stats.totalDebt || 0) + Number(stats.totalCredit || 0)),
-          totalDebt: Math.abs(Number(stats.totalDebt || 0)),
-          totalCredit: Number(stats.totalCredit || 0),
-          averageBalance: Number(stats.averageBalance || 0),
-          representativesWithDebt: withDebtNum,
-          representativesWithCredit: withCreditNum,
-          representativesWithZeroBalance: totalNum - withDebtNum - withCreditNum
-        },
-        filters: {
-          applied: Object.keys(req.query).length > 0,
-          search,
-          balanceStatus,
-          hasDebt,
-          hasCredit,
-          hasStudents,
-          sortBy,
-          sortOrder
-        }
-      };
-
-      res.status(200).json({
-        result: true,
-        content: response,
-        error: []
-      });
-
-    } catch (error) {
-      console.error('❌ Error listando representantes:', error);
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listRepresentatives"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al listar representantes'] 
-      });
-    }
-  };
-
-  //#region: Obtener representantes con más deuda
-  static getTopDebtors = async (req: Request, res: Response) => {
-    try {
-      const { limit = 10 } = req.query;
-
-      const representatives = await Representative.findAll({
-        where: {
-          balance: { [Op.lt]: 0 }
-        },
-        attributes: [
-          'id',
-          'fullName',
-          'identityCard',
-          'phone',
-          'balance',
-          [
-            literal('ABS(balance)'),
-            'debtAmount'
-          ]
-        ],
-        order: [
-          [literal('ABS(balance)'), 'DESC']
-        ],
-        limit: Number(limit),
-        include: [{
-          model: Student,
-          as: 'students',
-          attributes: ['id', 'fullName', 'status']
-        }]
-      });
-
-      // Calcular total de deuda
-      const totalDebt = await Representative.sum('balance', {
-        where: { balance: { [Op.lt]: 0 } }
-      }) || 0;
-
-      const formatted = representatives.map(rep => {
-        const repData = rep.toJSON();
-        const students = (repData as any).students || [];
-        const activeStudents = students.filter((s: any) => 
-          s.status === 'active' || s.status === 'regular'
-        );
-
-        return {
-          ...repData,
-          debtAmount: Math.abs(repData.balance || 0),
-          balanceStatus: 'debt',
-          activeStudents: activeStudents.length,
-          monthlyFee: activeStudents.length * 30,
-          monthsInDebt: Math.ceil(Math.abs(repData.balance || 0) / (activeStudents.length * 30 || 1))
-        };
-      });
-
-      res.status(200).json({
-        result: true,
-        content: {
-          debtors: formatted,
-          summary: {
-            totalDebtors: formatted.length,
-            totalDebtAmount: Math.abs(totalDebt),
-            averageDebt: Math.abs(totalDebt) / (formatted.length || 1),
-            highestDebt: formatted[0]?.debtAmount || 0,
-            lowestDebt: formatted[formatted.length - 1]?.debtAmount || 0
-          }
-        },
-        error: []
-      });
-
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTopDebtors"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al obtener deudores'] 
-      });
-    }
-  };
-
-  //#region: Obtener representantes con más saldo
-  static getTopCreditors = async (req: Request, res: Response) => {
-    try {
-      const { limit = 10 } = req.query;
-
-      const representatives = await Representative.findAll({
-        where: {
-          balance: { [Op.gt]: 0 }
-        },
-        attributes: [
-          'id',
-          'fullName',
-          'identityCard',
-          'phone',
-          'balance',
-          [
-            literal('balance'),
-            'creditAmount'
-          ]
-        ],
-        order: [
-          ['balance', 'DESC']
-        ],
-        limit: Number(limit),
-        include: [{
-          model: Student,
-          as: 'students',
-          attributes: ['id', 'fullName', 'status']
-        }]
-      });
-
-      // Calcular total de saldo positivo
-      const totalCredit = await Representative.sum('balance', {
-        where: { balance: { [Op.gt]: 0 } }
-      }) || 0;
-
-      const formatted = representatives.map(rep => {
-        const repData = rep.toJSON();
-        const students = (repData as any).students || [];
-        const activeStudents = students.filter((s: any) => 
-          s.status === 'active' || s.status === 'regular'
-        );
-
-        return {
-          ...repData,
-          creditAmount: repData.balance || 0,
-          balanceStatus: 'credit',
-          activeStudents: activeStudents.length,
-          monthsPaidAhead: Math.floor((repData.balance || 0) / (activeStudents.length * 30 || 1))
-        };
-      });
-
-      res.status(200).json({
-        result: true,
-        content: {
-          creditors: formatted,
-          summary: {
-            totalCreditors: formatted.length,
-            totalCreditAmount: totalCredit,
-            averageCredit: totalCredit / (formatted.length || 1),
-            highestCredit: formatted[0]?.creditAmount || 0,
-            lowestCredit: formatted[formatted.length - 1]?.creditAmount || 0
-          }
-        },
-        error: []
-      });
-
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTopCreditors"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al obtener acreedores'] 
-      });
-    }
-  };
-
-  //#region: Obtener estadísticas financieras
-  static getFinancialStatistics = async (req: Request, res: Response) => {
-    try {
-      // Estadísticas generales
-      const generalStats = await Representative.findAll({
-        attributes: [
-          [fn('COUNT', col('id')), 'total'],
-          [fn('SUM', col('balance')), 'totalBalance'],
-          [fn('AVG', col('balance')), 'averageBalance'],
-          [fn('COUNT', literal('CASE WHEN balance < 0 THEN 1 END')), 'withDebt'],
-          [fn('COUNT', literal('CASE WHEN balance > 0 THEN 1 END')), 'withCredit'],
-          [fn('COUNT', literal('CASE WHEN balance = 0 THEN 1 END')), 'withZero']
-        ],
-        raw: true
-      });
-
-      // Distribución por rango de saldo
-      const balanceDistribution = await Representative.findAll({
-        attributes: [
-          [
-            literal(`
-              CASE 
-                WHEN balance < -500 THEN 'Menos de -500'
-                WHEN balance >= -500 AND balance < -100 THEN '-500 a -100'
-                WHEN balance >= -100 AND balance < 0 THEN '-100 a 0'
-                WHEN balance = 0 THEN '0'
-                WHEN balance > 0 AND balance <= 100 THEN '0 a 100'
-                WHEN balance > 100 AND balance <= 500 THEN '100 a 500'
-                ELSE 'Más de 500'
-              END
-            `),
-            'range'
-          ],
-          [fn('COUNT', col('id')), 'count'],
-          [fn('SUM', col('balance')), 'total']
-        ],
-        group: ['range'],
-        order: [[literal('MIN(balance)'), 'ASC']],
-        raw: true
-      });
-
-      // Historial de transacciones por mes
-      const monthlyTransactions = await Transaction.findAll({
-        attributes: [
-          [fn('DATE_TRUNC', 'month', col('createdAt')), 'month'],
-          [fn('COUNT', col('id')), 'transactionCount'],
-          [fn('SUM', literal("CASE WHEN type = 'deposit' THEN amount ELSE 0 END")), 'totalDeposits'],
-          [fn('SUM', literal("CASE WHEN type = 'withdrawal' THEN amount ELSE 0 END")), 'totalWithdrawals']
-        ],
-        where: {
-          status: TransactionStatus.COMPLETED,
-          createdAt: {
-            [Op.gte]: new Date(new Date().setMonth(new Date().getMonth() - 6))
-          }
-        },
-        group: [fn('DATE_TRUNC', 'month', col('createdAt'))],
-        order: [[fn('DATE_TRUNC', 'month', col('createdAt')), 'DESC']],
-        raw: true
-      });
-
-      // Representantes con estudiantes activos
-      const repsWithActiveStudents = await Representative.count({
-        include: [{
-          model: Student,
-          as: 'students',
-          where: {
-            status: { [Op.in]: ['active', 'regular'] }
-          },
-          required: true,
-          attributes: []
-        }]
-      });
-
-      // Deuda total proyectada (30 USD por hijo activo por mes)
-      const activeStudents = await Student.count({
-        where: {
-          status: { [Op.in]: ['active', 'regular'] }
-        }
-      });
-
-      const projectedMonthlyRevenue = activeStudents * 30;
-
-      const response = {
-        general: generalStats[0] || {},
-        balanceDistribution,
-        monthlyTransactions,
-        studentStatistics: {
-          totalActiveStudents: activeStudents,
-          representativesWithActiveStudents: repsWithActiveStudents,
-          projectedMonthlyRevenue,
-          averageStudentsPerRepresentative: repsWithActiveStudents > 0 ? 
-            (activeStudents / repsWithActiveStudents).toFixed(2) : 0
-        },
-        alerts: {
-          highDebt: await Representative.count({
-            where: {
-              balance: { [Op.lt]: -100 }
+            const offset = (Number(page) - 1) * Number(limit);
+            
+            const where: any = {};
+            
+            // Filtros básicos
+            if (fullName) where.fullName = { [Op.iLike]: `%${fullName}%` };
+            if (identityCard) where.identityCard = { [Op.iLike]: `%${identityCard}%` };
+            if (relationship) where.relationship = relationship;
+            
+            // Filtro por saldo
+            if (balanceStatus) {
+                switch (balanceStatus) {
+                    case 'debt':
+                        where.balance = { [Op.lt]: 0 };
+                        break;
+                    case 'zero':
+                        where.balance = { [Op.eq]: 0 };
+                        break;
+                    case 'credit':
+                        where.balance = { [Op.gt]: 0 };
+                        break;
+                }
             }
-          }),
-          upcomingPayments: await Representative.count({
-            where: {
-              balance: { [Op.lt]: 0 },
-              updatedAt: {
-                [Op.lt]: new Date(new Date().setDate(new Date().getDate() - 30))
-              }
+            
+            // Rango de saldo
+            if (minBalance !== undefined || maxBalance !== undefined) {
+                where.balance = {};
+                if (minBalance !== undefined) where.balance[Op.gte] = Number(minBalance);
+                if (maxBalance !== undefined) where.balance[Op.lte] = Number(maxBalance);
             }
-          })
-        },
-        calculatedAt: new Date().toISOString()
-      };
+            
+            // Filtros booleanos
+            if (hasDebt === 'true') where.balance = { [Op.lt]: 0 };
+            if (hasCredit === 'true') where.balance = { [Op.gt]: 0 };
+            
+            // Búsqueda general
+            if (search) {
+                where[Op.or] = [
+                    { fullName: { [Op.iLike]: `%${search}%` } },
+                    { identityCard: { [Op.iLike]: `%${search}%` } },
+                    { phone: { [Op.iLike]: `%${search}%` } }
+                ];
+            }
+            
+            // Filtrar solo representantes con usuarios activos
+            if (activeOnly === true || activeOnly === 'true') {
+                where['$user.userstatus$'] = true;
+            }
 
-      res.status(200).json({
-        result: true,
-        content: response,
-        error: []
-      });
+            // Configurar ordenamiento
+            let order: any[] = [['fullName', 'ASC']];
+            if (sortBy === 'balance') {
+                order = [[literal('COALESCE(balance, 0)'), sortOrder === 'asc' ? 'ASC' : 'DESC']];
+            } else if (sortBy === 'debtAmount') {
+                order = [[literal('ABS(COALESCE(balance, 0))'), sortOrder === 'asc' ? 'ASC' : 'DESC']];
+            } else if (sortBy === 'createdAt') {
+                order = [['createdAt', sortOrder === 'asc' ? 'ASC' : 'DESC']];
+            } else if (sortBy === 'fullName') {
+                order = [['fullName', sortOrder === 'asc' ? 'ASC' : 'DESC']];
+            }
 
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getFinancialStatistics"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al obtener estadísticas'] 
-      });
-    }
-  };
+            // Consulta principal
+            const { count, rows: representatives } = await Representative.findAndCountAll({
+                where,
+                limit: Number(limit),
+                offset,
+                order,
+                include: [
+                    {
+                        model: UserLogin,
+                        as: 'user',
+                        attributes: ['id', 'userlogin', 'usermail', 'userstatus'],
+                        required: true
+                    },
+                    {
+                        model: Student,
+                        as: 'students',
+                        attributes: ['id', 'fullName', 'status'],
+                        required: false
+                    }
+                ],
+                distinct: true
+            });
 
-  //#region: Registrar depósito manual
-  static manualDeposit = async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { 
-        amount, 
-        description, 
-        paymentMethod = PaymentMethod.CASH,
-        reference,
-        createdBy 
-      } = req.body;
+            // Formatear respuesta
+            const formattedRepresentatives = representatives.map((rep: any) => ({
+                id: rep.id,
+                fullName: rep.fullName,
+                identityCard: rep.identityCard,
+                phone: rep.phone,
+                relationship: rep.relationship,
+                balance: rep.balance || 0,
+                balanceFormatted: rep.balanceFormatted,
+                balanceStatus: rep.balance < 0 ? 'debt' : rep.balance > 0 ? 'credit' : 'zero',
+                debtAmount: rep.balance < 0 ? Math.abs(rep.balance) : 0,
+                studentCount: rep.students?.length || 0,
+                userStatus: rep.user?.userstatus || false,
+                email: rep.user?.usermail || '',
+                createdAt: rep.createdAt,
+                updatedAt: rep.updatedAt
+            }));
 
-      if (!amount || amount <= 0) {
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: ['El monto debe ser mayor a 0'] 
-        });
-      }
+            res.status(200).json({
+                result: true,
+                content: {
+                    representatives: formattedRepresentatives,
+                    pagination: {
+                        totalRecords: count,
+                        currentPage: Number(page),
+                        totalPages: Math.ceil(count / Number(limit)),
+                        pageSize: Number(limit)
+                    }
+                },
+                error: []
+            });
 
-      const representative = await Representative.findByPk(id);
-      if (!representative) {
-        return res.status(404).json({ 
-          result: false, 
-          content: [], 
-          error: ['Representante no encontrado'] 
-        });
-      }
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listRepresentatives"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener representantes']
+            });
+        }
+    };
 
-      // Crear la transacción
-      const transaction = await Transaction.create({
-        representativeId: id,
-        type: TransactionType.DEPOSIT,
-        amount: parseFloat(amount),
-        description: description || `Depósito manual (${paymentMethod})`,
-        paymentMethod,
-        reference,
-        status: TransactionStatus.COMPLETED,
-        createdBy,
-        processedAt: new Date(),
-        transactionDate: new Date()
-      });
+    // Top deudores
+    static getTopDebtors = async (req: Request, res: Response) => {
+        try {
+            const limit = Number(req.query.limit) || 10;
+            
+            const debtors = await Representative.findAll({
+                where: {
+                    balance: { [Op.lt]: 0 }
+                },
+                limit,
+                order: [['balance', 'ASC']], // Ordenar por deuda más alta (negativo más bajo)
+                include: [
+                    {
+                        model: Student,
+                        as: 'students',
+                        attributes: ['id', 'fullName'],
+                        required: false
+                    },
+                    {
+                        model: UserLogin,
+                        as: 'user',
+                        attributes: ['usermail', 'userstatus'],
+                        required: true
+                    }
+                ]
+            });
 
-      // Actualizar el balance
-      const currentBalance = representative.balance || 0;
-      const newBalance = currentBalance + parseFloat(amount);
-      
-      await representative.update({ 
-        balance: newBalance,
-        updatedAt: new Date()
-      });
+            const formattedDebtors = debtors.map((debtor: any) => ({
+                id: debtor.id,
+                fullName: debtor.fullName,
+                identityCard: debtor.identityCard,
+                balance: debtor.balance || 0,
+                debtAmount: Math.abs(debtor.balance || 0),
+                studentCount: debtor.students?.length || 0,
+                email: debtor.user?.usermail || '',
+                phone: debtor.phone
+            }));
 
-      console.log(`✅ Depósito manual registrado:`, {
-        representativeId: id,
-        amount: parseFloat(amount),
-        newBalance,
-        transactionId: transaction.id
-      });
+            res.status(200).json({
+                result: true,
+                content: {
+                    debtors: formattedDebtors,
+                    totalDebt: formattedDebtors.reduce((sum, d) => sum + d.debtAmount, 0)
+                },
+                error: []
+            });
 
-      res.status(200).json({ 
-        result: true, 
-        content: {
-          transaction,
-          newBalance,
-          representative: {
-            id: representative.id,
-            name: representative.fullName,
-            previousBalance: currentBalance
-          },
-          message: 'Depósito registrado exitosamente'
-        }, 
-        error: [] 
-      });
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTopDebtors"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener top deudores']
+            });
+        }
+    };
 
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al registrar el depósito'] 
-      });
-    }
-  };
+    // Top con más saldo
+    static getTopCreditors = async (req: Request, res: Response) => {
+        try {
+            const limit = Number(req.query.limit) || 10;
+            
+            const creditors = await Representative.findAll({
+                where: {
+                    balance: { [Op.gt]: 0 }
+                },
+                limit,
+                order: [['balance', 'DESC']],
+                include: [
+                    {
+                        model: Student,
+                        as: 'students',
+                        attributes: ['id', 'fullName'],
+                        required: false
+                    }
+                ]
+            });
 
-  //#region: Registrar pago bancario validado
-  static registerBankPayment = async (
-    representativeId: string, 
-    amount: number, 
-    bankData: {
-      reference: string;
-      bankCode: string;
-      accountNumber: string;
-      phoneNumber: string;
-      clientId: string;
-      validationResponse: any;
-    }
-  ) => {
-    try {
-      const representative = await Representative.findByPk(representativeId);
-      if (!representative) {
-        throw new Error('Representante no encontrado');
-      }
+            const formattedCreditors = creditors.map((creditor: any) => ({
+                id: creditor.id,
+                fullName: creditor.fullName,
+                identityCard: creditor.identityCard,
+                balance: creditor.balance || 0,
+                creditAmount: creditor.balance || 0,
+                studentCount: creditor.students?.length || 0,
+                phone: creditor.phone
+            }));
 
-      // Verificar duplicados
-      const duplicateCheck = await TransactionValidator.isDuplicateTransaction({
-        reference: bankData.reference,
-        bankCode: bankData.bankCode,
-        accountNumber: bankData.accountNumber,
-        amount: amount,
-        phoneNumber: bankData.phoneNumber
-      });
+            res.status(200).json({
+                result: true,
+                content: {
+                    creditors: formattedCreditors,
+                    totalCredit: formattedCreditors.reduce((sum, c) => sum + c.creditAmount, 0)
+                },
+                error: []
+            });
 
-      if (duplicateCheck.isDuplicate && duplicateCheck.existingTransaction) {
-        const existing = duplicateCheck.existingTransaction;
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTopCreditors"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener top con saldo']
+            });
+        }
+    };
+
+    // Obtener balance de un representante
+    static getBalance = async (req: Request, res: Response) => {
+        try {
+            const { id } = req.params;
+            
+            const representative = await Representative.findByPk(id, {
+                include: [
+                    {
+                        model: UserLogin,
+                        as: 'user',
+                        attributes: ['userlogin', 'usermail', 'userstatus']
+                    },
+                    {
+                        model: Student,
+                        as: 'students',
+                        attributes: ['id', 'fullName', 'status', 'currentGrade']
+                    }
+                ]
+            });
+
+            if (!representative) {
+                return res.status(404).json({
+                    result: false,
+                    content: [],
+                    error: ['Representante no encontrado']
+                });
+            }
+
+            // Obtener últimas transacciones
+            const recentTransactions = await Transaction.findAll({
+                where: { representativeId: id },
+                limit: 10,
+                order: [['createdAt', 'DESC']]
+            });
+
+            const result = {
+                representative: {
+                    id: representative.id,
+                    fullName: representative.fullName,
+                    identityCard: representative.identityCard,
+                    phone: representative.phone,
+                    balance: representative.balance || 0,
+                    balanceFormatted: representative.balanceFormatted,
+                    balanceStatus: representative.balanceStatus,
+                    debtAmount: representative.debtAmount || 0,
+                    studentCount: representative.students?.length || 0,
+                    userEmail: representative.user?.usermail || ''
+                },
+                recentTransactions: recentTransactions.map((t: any) => ({
+                    id: t.id,
+                    type: t.type,
+                    amount: t.amount,
+                    description: t.description,
+                    status: t.status,
+                    createdAt: t.createdAt
+                })),
+                balanceInfo: representative.getBalanceInfo ? representative.getBalanceInfo() : {}
+            };
+
+            res.status(200).json({
+                result: true,
+                content: result,
+                error: []
+            });
+
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getBalance"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener balance']
+            });
+        }
+    };
+
+    // Historial de transacciones
+    static getTransactionHistory = async (req: Request, res: Response) => {
+        try {
+            const { id } = req.params;
+            const {
+                page = 1,
+                limit = 20,
+                type,
+                status,
+                startDate,
+                endDate
+            } = req.query;
+
+            const offset = (Number(page) - 1) * Number(limit);
+            
+            const where: any = { representativeId: id };
+            
+            if (type) where.type = type;
+            if (status) where.status = status;
+            
+            if (startDate || endDate) {
+                where.createdAt = {};
+                if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
+                if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
+            }
+
+            const { count, rows: transactions } = await Transaction.findAndCountAll({
+                where,
+                limit: Number(limit),
+                offset,
+                order: [['createdAt', 'DESC']],
+                include: [
+                    {
+                        model: Representative,
+                        as: 'representative',
+                        attributes: ['fullName', 'identityCard']
+                    }
+                ]
+            });
+
+            res.status(200).json({
+                result: true,
+                content: {
+                    transactions,
+                    pagination: {
+                        totalRecords: count,
+                        currentPage: Number(page),
+                        totalPages: Math.ceil(count / Number(limit)),
+                        pageSize: Number(limit)
+                    }
+                },
+                error: []
+            });
+
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionHistory"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener historial']
+            });
+        }
+    };
+
+    // Estadísticas financieras
+    static getFinancialStatistics = async (req: Request, res: Response) => {
+        try {
+            // Total de representantes
+            const totalRepresentatives = await Representative.count();
+            
+            // Representantes con deuda
+            const debtorsCount = await Representative.count({
+                where: { balance: { [Op.lt]: 0 } }
+            });
+            
+            // Representantes con saldo positivo
+            const creditorsCount = await Representative.count({
+                where: { balance: { [Op.gt]: 0 } }
+            });
+            
+            // Total deuda
+            const totalDebtResult = await Representative.sum('balance', {
+                where: { balance: { [Op.lt]: 0 } }
+            });
+            const totalDebt = Math.abs(totalDebtResult || 0);
+            
+            // Total saldo positivo
+            const totalCredit = await Representative.sum('balance', {
+                where: { balance: { [Op.gt]: 0 } }
+            }) || 0;
+            
+            // Transacciones del mes actual
+            const now = new Date();
+            const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            
+            const monthlyTransactions = await Transaction.findAll({
+                where: {
+                    createdAt: {
+                        [Op.between]: [firstDayOfMonth, lastDayOfMonth]
+                    },
+                    status: 'completed'
+                },
+                attributes: [
+                    'type',
+                    [fn('SUM', col('amount')), 'totalAmount']
+                ],
+                group: ['type'],
+                raw: true
+            });
+            
+            const totalDeposits = monthlyTransactions
+                .filter((t: any) => t.type === 'deposit')
+                .reduce((sum: number, t: any) => sum + parseFloat(t.totalAmount || 0), 0);
+            
+            const totalWithdrawals = monthlyTransactions
+                .filter((t: any) => t.type === 'withdrawal')
+                .reduce((sum: number, t: any) => sum + parseFloat(t.totalAmount || 0), 0);
+            
+            const result = {
+                general: {
+                    totalRepresentatives,
+                    debtorsCount,
+                    creditorsCount,
+                    zeroBalanceCount: totalRepresentatives - debtorsCount - creditorsCount,
+                    totalDebt,
+                    totalCredit,
+                    netBalance: totalCredit - totalDebt
+                },
+                monthlyTransactions: {
+                    totalDeposits,
+                    totalWithdrawals,
+                    netMonthly: totalDeposits - totalWithdrawals,
+                    transactionCount: monthlyTransactions.length
+                },
+                percentages: {
+                    debtorsPercentage: Math.round((debtorsCount / totalRepresentatives) * 100) || 0,
+                    creditorsPercentage: Math.round((creditorsCount / totalRepresentatives) * 100) || 0,
+                    paymentRate: Math.round(((totalRepresentatives - debtorsCount) / totalRepresentatives) * 100) || 0
+                }
+            };
+
+            res.status(200).json({
+                result: true,
+                content: result,
+                error: []
+            });
+
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getFinancialStatistics"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener estadísticas financieras']
+            });
+        }
+    };
+
+    // Transacciones recientes (para dashboard)
+    static getRecentTransactions = async (req: Request, res: Response) => {
+        try {
+            const limit = Number(req.query.limit) || 10;
+            
+            const transactions = await Transaction.findAll({
+                limit,
+                order: [['createdAt', 'DESC']],
+                include: [
+                    {
+                        model: Representative,
+                        as: 'representative',
+                        attributes: ['fullName', 'identityCard']
+                    }
+                ]
+            });
+
+            res.status(200).json({
+                result: true,
+                content: transactions,
+                error: []
+            });
+
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener transacciones recientes']
+            });
+        }
+    };
+
+    // Depósito manual
+    static manualDeposit = async (req: Request, res: Response) => {
+        const transaction = await sequelize.transaction();
         
-        // Obtener nombre del representante que ya registró
-        let existingRepName = 'Desconocido';
-        if (existing.representativeId) {
-          const existingRep = await Representative.findByPk(existing.representativeId, {
-            attributes: ['fullName']
-          });
-          if (existingRep) {
-            existingRepName = existingRep.fullName || 'Desconocido';
-          }
+        try {
+            const { id } = req.params;
+            const { amount, description, paymentMethod, reference, createdBy } = req.body;
+            
+            // Validaciones
+            if (!amount || amount <= 0) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: ['El monto debe ser mayor a 0']
+                });
+            }
+            
+            // Verificar que el representante exista
+            const representative = await Representative.findByPk(id, { transaction });
+            if (!representative) {
+                await transaction.rollback();
+                return res.status(404).json({
+                    result: false,
+                    content: [],
+                    error: ['Representante no encontrado']
+                });
+            }
+            
+            // Crear transacción
+            const newTransaction = await Transaction.create({
+                representativeId: id,
+                type: 'deposit',
+                amount: amount,
+                description: description || 'Depósito manual',
+                paymentMethod: paymentMethod || 'efectivo',
+                reference: reference || `MANUAL-${Date.now()}`,
+                status: 'completed',
+                createdBy: createdBy || 'system',
+                balanceBefore: representative.balance || 0,
+                balanceAfter: (representative.balance || 0) + amount
+            }, { transaction });
+            
+            // Actualizar saldo del representante
+            await representative.update({
+                balance: (representative.balance || 0) + amount
+            }, { transaction });
+            
+            await transaction.commit();
+            
+            res.status(200).json({
+                result: true,
+                content: {
+                    message: 'Depósito registrado exitosamente',
+                    transactionId: newTransaction.id,
+                    newBalance: representative.balance
+                },
+                error: []
+            });
+            
+        } catch (error: any) {
+            await transaction.rollback();
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: [`Error al realizar depósito: ${error.message}`]
+            });
         }
+    };
 
-        return {
-          success: false,
-          duplicate: true,
-          message: `Esta transacción ya fue registrada por ${existingRepName} el ${new Date(existing.createdAt).toLocaleDateString()}`,
-          existingTransaction: existing
-        };
-      }
-
-      // Crear la transacción
-      const transaction = await Transaction.create({
-        representativeId,
-        type: TransactionType.DEPOSIT,
-        amount,
-        description: `Pago bancario validado - ${bankData.bankCode}`,
-        paymentMethod: PaymentMethod.PAGO_MOVIL,
-        reference: bankData.reference,
-        status: TransactionStatus.COMPLETED,
-        externalReference: bankData.reference,
-        bankCode: bankData.bankCode,
-        accountNumber: bankData.accountNumber,
-        transactionDate: new Date(),
-        metadata: {
-          bankValidation: bankData.validationResponse,
-          phoneNumber: bankData.phoneNumber,
-          clientId: bankData.clientId,
-          processedAt: new Date().toISOString()
-        },
-        processedAt: new Date()
-      });
-
-      // Actualizar balance
-      const currentBalance = representative.balance || 0;
-      const newBalance = currentBalance + amount;
-      
-      await representative.update({ 
-        balance: newBalance,
-        updatedAt: new Date()
-      });
-
-      console.log(`✅ Pago bancario registrado:`, {
-        representativeId,
-        amount,
-        newBalance,
-        transactionId: transaction.id,
-        reference: bankData.reference
-      });
-
-      return {
-        success: true,
-        transaction,
-        newBalance,
-        representative: {
-          id: representative.id,
-          name: representative.fullName,
-          previousBalance: currentBalance,
-          newBalance
+    // Retiro manual
+    static manualWithdrawal = async (req: Request, res: Response) => {
+        const transaction = await sequelize.transaction();
+        
+        try {
+            const { id } = req.params;
+            const { amount, description, paymentMethod, reference, createdBy } = req.body;
+            
+            // Validaciones
+            if (!amount || amount <= 0) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: ['El monto debe ser mayor a 0']
+                });
+            }
+            
+            // Verificar que el representante exista
+            const representative = await Representative.findByPk(id, { transaction });
+            if (!representative) {
+                await transaction.rollback();
+                return res.status(404).json({
+                    result: false,
+                    content: [],
+                    error: ['Representante no encontrado']
+                });
+            }
+            
+            // Verificar saldo suficiente
+            if ((representative.balance || 0) < amount) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: [`Saldo insuficiente. Saldo actual: ${representative.balance || 0}`]
+                });
+            }
+            
+            // Crear transacción
+            const newTransaction = await Transaction.create({
+                representativeId: id,
+                type: 'withdrawal',
+                amount: amount,
+                description: description || 'Retiro manual',
+                paymentMethod: paymentMethod || 'efectivo',
+                reference: reference || `MANUAL-${Date.now()}`,
+                status: 'completed',
+                createdBy: createdBy || 'system',
+                balanceBefore: representative.balance || 0,
+                balanceAfter: (representative.balance || 0) - amount
+            }, { transaction });
+            
+            // Actualizar saldo del representante
+            await representative.update({
+                balance: (representative.balance || 0) - amount
+            }, { transaction });
+            
+            await transaction.commit();
+            
+            res.status(200).json({
+                result: true,
+                content: {
+                    message: 'Retiro registrado exitosamente',
+                    transactionId: newTransaction.id,
+                    newBalance: representative.balance
+                },
+                error: []
+            });
+            
+        } catch (error: any) {
+            await transaction.rollback();
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualWithdrawal"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: [`Error al realizar retiro: ${error.message}`]
+            });
         }
-      };
+    };
 
-    } catch (error) {
-      console.error('❌ Error en registerBankPayment:', error);
-      ErrorLog.createErrorLog(error, 'System', getErrorLocation("registerBankPayment"));
-      
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Error al registrar pago',
-        error: error
-      };
-    }
-  };
-
-  //#region: Verificar estado de transacción
-  static getTransactionStatus = async (req: Request, res: Response) => {
-    try {
-      const { reference, bankCode, accountNumber, amount } = req.query;
-
-      if (!reference || !bankCode) {
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: ['Se requiere referencia y código de banco'] 
-        });
-      }
-
-      const transaction = await Transaction.findOne({
-        where: {
-          reference: reference as string,
-          bankCode: bankCode as string,
-          ...(accountNumber && { accountNumber: accountNumber as string }),
-          ...(amount && { amount: parseFloat(amount as string) })
-        },
-        include: [{
-          model: Representative,
-          as: 'representative',
-          attributes: ['id', 'fullName', 'identityCard', 'phone']
-        }],
-        order: [['createdAt', 'DESC']]
-      });
-
-      if (!transaction) {
-        return res.status(200).json({ 
-          result: true, 
-          content: {
-            exists: false,
-            message: 'Transacción no registrada'
-          }, 
-          error: [] 
-        });
-      }
-
-      const response = {
-        exists: true,
-        transaction: {
-          id: transaction.id,
-          amount: transaction.amount,
-          reference: transaction.reference,
-          bankCode: transaction.bankCode,
-          accountNumber: transaction.accountNumber,
-          status: transaction.status,
-          createdAt: transaction.createdAt,
-          paymentMethod: transaction.paymentMethod
-        },
-        representative: transaction.representative ? {
-          id: transaction.representative.id,
-          fullName: transaction.representative.fullName,
-          identityCard: transaction.representative.identityCard
-        } : null
-      };
-
-      res.status(200).json({ 
-        result: true, 
-        content: response, 
-        error: [] 
-      });
-
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionStatus"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al verificar transacción'] 
-      });
-    }
-  };
-
-  //#region: Verificar si un pago ya fue registrado
-  static checkPaymentExists = async (req: Request, res: Response) => {
-    try {
-      const { reference, representativeId } = req.query;
-
-      if (!reference || !representativeId) {
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: ['Se requiere referencia e ID del representante'] 
-        });
-      }
-
-      const transaction = await Transaction.findOne({
-        where: { 
-          reference: reference as string,
-          representativeId: representativeId as string,
-          type: TransactionType.DEPOSIT
-        },
-        attributes: ['id', 'amount', 'status', 'createdAt']
-      });
-
-      res.status(200).json({ 
-        result: true, 
-        content: {
-          exists: !!transaction,
-          transaction: transaction || null
-        }, 
-        error: [] 
-      });
-
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("checkPaymentExists"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al verificar el pago'] 
-      });
-    }
-  };
-
-  //#region: Obtener historial de transacciones
-  static getTransactionHistory = async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { 
-        page = 1, 
-        limit = 20, 
-        type, 
-        startDate, 
-        endDate,
-        status 
-      } = req.query;
-
-      const offset = (Number(page) - 1) * Number(limit);
-
-      // Verificar que el representante existe
-      const representative = await Representative.findByPk(id, {
-        attributes: ['id']
-      });
-
-      if (!representative) {
-        return res.status(404).json({ 
-          result: false, 
-          content: [], 
-          error: ['Representante no encontrado'] 
-        });
-      }
-
-      // Construir filtros
-      const where: any = { representativeId: id };
-
-      if (type) {
-        where.type = type;
-      }
-
-      if (status) {
-        where.status = status;
-      }
-
-      if (startDate || endDate) {
-        where.createdAt = {};
-        if (startDate) {
-          where.createdAt[Op.gte] = new Date(startDate as string);
+    // Verificar si existe un pago
+    static checkPaymentExists = async (req: Request, res: Response) => {
+        try {
+            const { reference, representativeId } = req.query;
+            
+            if (!reference || !representativeId) {
+                return res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: ['La referencia y el ID del representante son requeridos']
+                });
+            }
+            
+            const existingTransaction = await Transaction.findOne({
+                where: {
+                    reference: reference as string,
+                    representativeId: representativeId as string,
+                    status: 'completed'
+                }
+            });
+            
+            res.status(200).json({
+                result: true,
+                content: {
+                    exists: !!existingTransaction,
+                    transaction: existingTransaction || null
+                },
+                error: []
+            });
+            
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("checkPaymentExists"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al verificar pago']
+            });
         }
-        if (endDate) {
-          where.createdAt[Op.lte] = new Date(endDate as string);
+    };
+
+    // Obtener estado de transacción
+    static getTransactionStatus = async (req: Request, res: Response) => {
+        try {
+            const { reference, bankCode, accountNumber, amount } = req.query;
+            
+            if (!reference || !bankCode) {
+                return res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: ['La referencia y el código de banco son requeridos']
+                });
+            }
+            
+            const transaction = await Transaction.findOne({
+                where: {
+                    reference: reference as string
+                },
+                include: [{
+                    model: Representative,
+                    as: 'representative',
+                    attributes: ['fullName', 'identityCard']
+                }]
+            });
+            
+            if (!transaction) {
+                return res.status(404).json({
+                    result: false,
+                    content: [],
+                    error: ['Transacción no encontrada']
+                });
+            }
+            
+            res.status(200).json({
+                result: true,
+                content: {
+                    id: transaction.id,
+                    type: transaction.type,
+                    amount: transaction.amount,
+                    status: transaction.status,
+                    reference: transaction.reference,
+                    description: transaction.description,
+                    createdAt: transaction.createdAt,
+                    updatedAt: transaction.updatedAt,
+                    representative: transaction.representative
+                },
+                error: []
+            });
+            
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionStatus"));
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener estado de transacción']
+            });
         }
-      }
-
-      const { count, rows: transactions } = await Transaction.findAndCountAll({
-        where,
-        limit: Number(limit),
-        offset,
-        order: [['createdAt', 'DESC']],
-        include: [{
-          model: Representative,
-          as: 'representative',
-          attributes: ['id', 'fullName', 'identityCard']
-        }]
-      });
-
-      res.status(200).json({
-        result: true,
-        content: transactions,
-        pagination: {
-          totalRecords: count,
-          currentPage: Number(page),
-          totalPages: Math.ceil(count / Number(limit)),
-          hasMore: offset + transactions.length < count
-        },
-        error: []
-      });
-
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionHistory"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al obtener el historial'] 
-      });
-    }
-  };
- 
-  //#region: Registrar retiro manual
-  static manualWithdrawal = async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { 
-        amount, 
-        description, 
-        paymentMethod = PaymentMethod.CASH,
-        reference,
-        createdBy 
-      } = req.body;
-
-      if (!amount || amount <= 0) {
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: ['El monto debe ser mayor a 0'] 
-        });
-      }
-
-      const representative = await Representative.findByPk(id);
-      if (!representative) {
-        return res.status(404).json({ 
-          result: false, 
-          content: [], 
-          error: ['Representante no encontrado'] 
-        });
-      }
-
-      // Verificar que tenga saldo suficiente
-      const currentBalance = representative.balance || 0;
-      if (currentBalance < amount) {
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: ['Saldo insuficiente'] 
-        });
-      }
-
-      // Crear la transacción
-      const transaction = await Transaction.create({
-        representativeId: id,
-        type: TransactionType.WITHDRAWAL,
-        amount: parseFloat(amount),
-        description: description || `Retiro manual (${paymentMethod})`,
-        paymentMethod,
-        reference,
-        status: TransactionStatus.COMPLETED,
-        createdBy,
-        processedAt: new Date()
-      });
-
-      // Actualizar el balance
-      const newBalance = currentBalance - parseFloat(amount);
-      
-      await representative.update({ 
-        balance: newBalance,
-        updatedAt: new Date()
-      });
-
-      console.log(`✅ Retiro manual registrado:`, {
-        representativeId: id,
-        amount: parseFloat(amount),
-        newBalance,
-        transactionId: transaction.id
-      });
-
-      res.status(200).json({ 
-        result: true, 
-        content: {
-          transaction,
-          newBalance,
-          message: 'Retiro registrado exitosamente'
-        }, 
-        error: [] 
-      });
-
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualWithdrawal"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al registrar el retiro'] 
-      });
-    }
-  };
-  //#region: Obtener transacciones recientes (para el dashboard)
-static getRecentTransactions = async (req: Request, res: Response) => {
-  try {
-    const { limit = 10 } = req.query;
-
-    const transactions = await Transaction.findAll({
-      limit: Number(limit),
-      order: [['createdAt', 'DESC']],
-      include: [{
-        model: Representative,
-        as: 'representative',
-        attributes: ['id', 'fullName', 'identityCard']
-      }],
-      attributes: ['id', 'type', 'amount', 'description', 'paymentMethod', 'reference', 'status', 'createdAt']
-    });
-
-    res.status(200).json({
-      result: true,
-      content: transactions,
-      error: []
-    });
-  } catch (error) {
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
-    res.status(500).json({ 
-      result: false, 
-      content: [], 
-      error: ['Error al obtener transacciones recientes'] 
-    });
-  }
-};
-//#endregion
+    };
 }

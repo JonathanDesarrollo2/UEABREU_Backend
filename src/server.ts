@@ -54,14 +54,12 @@ server.use('/api/public/login', RouterUser);
 // 👇 RUTAS DEL BANCO (SOLO LAS ESENCIALES)
 server.use('/api/bank', BankRoutes);
 
-// Rutas Privadas (requieren autenticación)
+// En server.ts, en la sección de rutas privadas
 server.use('/api/private/user', RouterUser);
-
 server.use('/api/private/academic', AcademicRouter);
+server.use('/api/private/balance', BalanceRoutes);
 
-server.use('/api/private/balance', BalanceRoutes); // <-- AGREGAR ESTA LÍNEA// En server.ts
-
-// Health Check y ruta raíz
+// Health check actualizado
 server.get('/api/', (req, res) => {
     res.json({ 
         status: 'OK', 
@@ -71,20 +69,16 @@ server.get('/api/', (req, res) => {
         services: {
             academic: 'Operational',
             bank: 'Available at /api/bank',
-            balance: 'Available at /api/private/balance' // <-- AGREGAR ESTE
+            balance: 'Available at /api/private/balance',
+            user: 'Available at /api/private/user',
+            auth: 'Available at /api/public/login'
         },
         endpoints: {
             health: '/api/',
-            bank_health: '/api/bank/health',
-            bank_welcome: '/api/bank/welcome',
-            bank_test: '/api/bank/test-connection',
-            bank_logon: '/api/bank/logon',
-            bank_validate: '/api/bank/validate-p2p',
-            cors_test: '/api/cors-test',
-            // Nuevos endpoints
-            balance_representatives: '/api/private/balance/representatives',
-            balance_transactions: '/api/private/balance/representative/:id/transactions',
-            balance_statistics: '/api/private/balance/statistics/financial'
+            user_stats: '/api/private/user/statistics',
+            balance_stats: '/api/private/balance/statistics/financial',
+            teachers: '/api/private/academic/teacher/list',
+            students: '/api/private/user/students/list'
         }
     });
 });

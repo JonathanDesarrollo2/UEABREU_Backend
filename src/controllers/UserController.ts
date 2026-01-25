@@ -308,342 +308,342 @@ export class User {
     //#endregion
 
     //#region Actualizar Usuarios con gestión de estudiantes post('/updatelogin')
-static updatelogin = async (req: Request, res: Response) => {
-    const transaction = await sequelize.transaction();
-    
-    try {
-        const loginData: typeuserlogin_full = req.body;
-        const { representativeData, studentsData, ...userUpdateData } = loginData;
+    static updatelogin = async (req: Request, res: Response) => {
+        const transaction = await sequelize.transaction();
         
-        // Buscar usuario
-        const ResultadoDB = await UserLogin.findOne({
-            where: { id: loginData.id },
-            transaction
-        });
-        
-        if (!ResultadoDB) {
-            await transaction.rollback();
-            res.status(202).json({ result: false, content: [], error: [`usuario: ${loginData.userlogin}, no encontrado`] });
-            return;
-        }
-        
-        // Verificar si está cambiando de nivel (solo si se envía nivel)
-        if (userUpdateData.nivel !== undefined && userUpdateData.nivel !== ResultadoDB.nivel) {
-            // Si estaba en nivel 1 (representante) y quiere cambiar a otro nivel
-            if (ResultadoDB.nivel === 1) {
-                // Buscar si tiene representante asociado
-                const representative = await Representative.findOne({
+        try {
+            const loginData: typeuserlogin_full = req.body;
+            const { representativeData, studentsData, ...userUpdateData } = loginData;
+            
+            // Buscar usuario
+            const ResultadoDB = await UserLogin.findOne({
+                where: { id: loginData.id },
+                transaction
+            });
+            
+            if (!ResultadoDB) {
+                await transaction.rollback();
+                res.status(202).json({ result: false, content: [], error: [`usuario: ${loginData.userlogin}, no encontrado`] });
+                return;
+            }
+            
+            // Verificar si está cambiando de nivel (solo si se envía nivel)
+            if (userUpdateData.nivel !== undefined && userUpdateData.nivel !== ResultadoDB.nivel) {
+                // Si estaba en nivel 1 (representante) y quiere cambiar a otro nivel
+                if (ResultadoDB.nivel === 1) {
+                    // Buscar si tiene representante asociado
+                    const representative = await Representative.findOne({
+                        where: { userId: ResultadoDB.id },
+                        transaction
+                    });
+                    
+                    if (representative) {
+                        // Verificar si el representante tiene estudiantes o deuda
+                        const studentCount = await Student.count({
+                            where: { representativeId: representative.id },
+                            transaction
+                        });
+                        
+                        if ((representative.balance || 0) < 0 || studentCount > 0) {
+                            await transaction.rollback();
+                            res.status(202).json({ 
+                                result: false, 
+                                content: [], 
+                                error: [`No se puede cambiar el nivel del usuario porque tiene ${studentCount} estudiante(s) y/o una deuda de ${Math.abs(representative.balance || 0)}`] 
+                            });
+                            return;
+                        }
+                    }
+                }
+            }
+            
+            // Actualizar datos del usuario
+            await ResultadoDB.update(userUpdateData, { transaction });
+            
+            // Si es representante (nivel 1) o sigue siendo representante
+            if ((userUpdateData.nivel === 1 || ResultadoDB.nivel === 1) && representativeData) {
+                // Buscar el representante asociado
+                let representative = await Representative.findOne({
                     where: { userId: ResultadoDB.id },
                     transaction
                 });
                 
                 if (representative) {
-                    // Verificar si el representante tiene estudiantes o deuda
-                    const studentCount = await Student.count({
+                    // Actualizar datos del representante
+                    await representative.update(representativeData, { transaction });
+                } else if (representativeData.identityCard && representativeData.fullName) {
+                    // Crear representante si no existe
+                    representative = await Representative.create({
+                        ...representativeData,
+                        userId: ResultadoDB.id,
+                        balance: representativeData.initialBalance || 0.00
+                    }, { transaction });
+                }
+                
+                // GESTIÓN DE ESTUDIANTES
+                if (studentsData && Array.isArray(studentsData) && representative) {
+                    // Obtener estudiantes actuales
+                    const currentStudents = await Student.findAll({
                         where: { representativeId: representative.id },
                         transaction
                     });
                     
-                    if ((representative.balance || 0) < 0 || studentCount > 0) {
-                        await transaction.rollback();
-                        res.status(202).json({ 
-                            result: false, 
-                            content: [], 
-                            error: [`No se puede cambiar el nivel del usuario porque tiene ${studentCount} estudiante(s) y/o una deuda de ${Math.abs(representative.balance || 0)}`] 
-                        });
-                        return;
-                    }
-                }
-            }
-        }
-        
-        // Actualizar datos del usuario
-        await ResultadoDB.update(userUpdateData, { transaction });
-        
-        // Si es representante (nivel 1) o sigue siendo representante
-        if ((userUpdateData.nivel === 1 || ResultadoDB.nivel === 1) && representativeData) {
-            // Buscar el representante asociado
-            let representative = await Representative.findOne({
-                where: { userId: ResultadoDB.id },
-                transaction
-            });
-            
-            if (representative) {
-                // Actualizar datos del representante
-                await representative.update(representativeData, { transaction });
-            } else if (representativeData.identityCard && representativeData.fullName) {
-                // Crear representante si no existe
-                representative = await Representative.create({
-                    ...representativeData,
-                    userId: ResultadoDB.id,
-                    balance: representativeData.initialBalance || 0.00
-                }, { transaction });
-            }
-            
-            // GESTIÓN DE ESTUDIANTES
-            if (studentsData && Array.isArray(studentsData) && representative) {
-                // Obtener estudiantes actuales
-                const currentStudents = await Student.findAll({
-                    where: { representativeId: representative.id },
-                    transaction
-                });
-                
-                const currentStudentIds = currentStudents.map(s => s.id);
-                const updatedStudentIds: string[] = [];
-                
-                // Procesar cada estudiante del request
-                for (const studentData of studentsData) {
-                    // Crear un tipo explícito para studentData con todos los campos posibles
-                    const typedStudentData = studentData as any;
+                    const currentStudentIds = currentStudents.map(s => s.id);
+                    const updatedStudentIds: string[] = [];
                     
-                    if (typedStudentData.id && currentStudentIds.includes(typedStudentData.id)) {
-                        // Actualizar estudiante existente
-                        const existingStudent = await Student.findOne({
+                    // Procesar cada estudiante del request
+                    for (const studentData of studentsData) {
+                        // Crear un tipo explícito para studentData con todos los campos posibles
+                        const typedStudentData = studentData as any;
+                        
+                        if (typedStudentData.id && currentStudentIds.includes(typedStudentData.id)) {
+                            // Actualizar estudiante existente
+                            const existingStudent = await Student.findOne({
+                                where: { 
+                                    id: typedStudentData.id,
+                                    representativeId: representative.id 
+                                },
+                                transaction
+                            });
+                            
+                            if (existingStudent) {
+                                // Preparar datos de actualización con fechas convertidas
+                                const updateData: any = { ...typedStudentData };
+                                
+                                // Convertir fechas si vienen como string
+                                if (typedStudentData.birthDate && typeof typedStudentData.birthDate === 'string') {
+                                    updateData.birthDate = new Date(typedStudentData.birthDate);
+                                }
+                                
+                                if (typedStudentData.admissionDate && typeof typedStudentData.admissionDate === 'string') {
+                                    updateData.admissionDate = new Date(typedStudentData.admissionDate);
+                                }
+                                
+                                // Si no viene admissionDate, mantener el valor actual
+                                if (!typedStudentData.admissionDate) {
+                                    delete updateData.admissionDate; // No actualizar si no se envía
+                                }
+                                
+                                await existingStudent.update(updateData, { transaction });
+                                updatedStudentIds.push(typedStudentData.id);
+                            }
+                        } else if (!typedStudentData.id && typedStudentData.identityCard && typedStudentData.fullName) {
+                            // Crear nuevo estudiante (verificar cédula única)
+                            const existingStudentById = await Student.findOne({
+                                where: { identityCard: typedStudentData.identityCard },
+                                transaction
+                            });
+                            
+                            if (!existingStudentById) {
+                                // PREPARAR DATOS CON TIPOS CORRECTOS
+                                const studentCreateData = {
+                                    // Información Personal
+                                    fullName: typedStudentData.fullName,
+                                    identityCard: typedStudentData.identityCard,
+                                    birthDate: new Date(typedStudentData.birthDate),
+                                    
+                                    // Dirección
+                                    state: typedStudentData.state,
+                                    zone: typedStudentData.zone,
+                                    addressDescription: typedStudentData.addressDescription,
+                                    phone: typedStudentData.phone || '',
+                                    
+                                    // Nacionalidad
+                                    nationality: typedStudentData.nationality,
+                                    birthCountry: typedStudentData.birthCountry,
+                                    
+                                    // Salud
+                                    hasAllergies: typedStudentData.hasAllergies || false,
+                                    allergiesDescription: typedStudentData.allergiesDescription || '',
+                                    hasDiseases: typedStudentData.hasDiseases || false,
+                                    diseasesDescription: typedStudentData.diseasesDescription || '',
+                                    
+                                    // Emergencia
+                                    emergencyContact: typedStudentData.emergencyContact,
+                                    emergencyPhone: typedStudentData.emergencyPhone,
+                                    
+                                    // Académico (con valores por defecto)
+                                    status: typedStudentData.status || 'pendiente',
+                                    admissionDate: typedStudentData.admissionDate ? 
+                                        new Date(typedStudentData.admissionDate) : new Date(),
+                                    initialSchoolYear: typedStudentData.initialSchoolYear || 
+                                        new Date().getFullYear().toString(),
+                                    currentGrade: typedStudentData.currentGrade || 'En asignar',
+                                    section: typedStudentData.section || 'Pendiente',
+                                    
+                                    // Relaciones
+                                    representativeId: representative.id!,
+                                    userId: ResultadoDB.id!,
+                                };
+
+                                const newStudent = await Student.create(studentCreateData, { transaction });
+                                
+                                updatedStudentIds.push(newStudent.id!);
+                            }
+                        }
+                    }
+                    
+                    // Opcional: Eliminar estudiantes que no están en el request
+                    // Para activar esta funcionalidad, descomenta el siguiente bloque:
+                    /*
+                    const studentsToDelete = currentStudentIds.filter(id => !updatedStudentIds.includes(id));
+                    if (studentsToDelete.length > 0) {
+                        // Verificar que los estudiantes a eliminar no tengan registros asociados (horarios, pagos, etc.)
+                        // Esta validación depende de tu modelo de datos
+                        await Student.destroy({
                             where: { 
-                                id: typedStudentData.id,
+                                id: studentsToDelete,
                                 representativeId: representative.id 
                             },
                             transaction
                         });
-                        
-                        if (existingStudent) {
-                            // Preparar datos de actualización con fechas convertidas
-                            const updateData: any = { ...typedStudentData };
-                            
-                            // Convertir fechas si vienen como string
-                            if (typedStudentData.birthDate && typeof typedStudentData.birthDate === 'string') {
-                                updateData.birthDate = new Date(typedStudentData.birthDate);
-                            }
-                            
-                            if (typedStudentData.admissionDate && typeof typedStudentData.admissionDate === 'string') {
-                                updateData.admissionDate = new Date(typedStudentData.admissionDate);
-                            }
-                            
-                            // Si no viene admissionDate, mantener el valor actual
-                            if (!typedStudentData.admissionDate) {
-                                delete updateData.admissionDate; // No actualizar si no se envía
-                            }
-                            
-                            await existingStudent.update(updateData, { transaction });
-                            updatedStudentIds.push(typedStudentData.id);
-                        }
-                    } else if (!typedStudentData.id && typedStudentData.identityCard && typedStudentData.fullName) {
-                        // Crear nuevo estudiante (verificar cédula única)
-                        const existingStudentById = await Student.findOne({
-                            where: { identityCard: typedStudentData.identityCard },
-                            transaction
-                        });
-                        
-                        if (!existingStudentById) {
-                            // PREPARAR DATOS CON TIPOS CORRECTOS
-                            const studentCreateData = {
-                                // Información Personal
-                                fullName: typedStudentData.fullName,
-                                identityCard: typedStudentData.identityCard,
-                                birthDate: new Date(typedStudentData.birthDate),
-                                
-                                // Dirección
-                                state: typedStudentData.state,
-                                zone: typedStudentData.zone,
-                                addressDescription: typedStudentData.addressDescription,
-                                phone: typedStudentData.phone || '',
-                                
-                                // Nacionalidad
-                                nationality: typedStudentData.nationality,
-                                birthCountry: typedStudentData.birthCountry,
-                                
-                                // Salud
-                                hasAllergies: typedStudentData.hasAllergies || false,
-                                allergiesDescription: typedStudentData.allergiesDescription || '',
-                                hasDiseases: typedStudentData.hasDiseases || false,
-                                diseasesDescription: typedStudentData.diseasesDescription || '',
-                                
-                                // Emergencia
-                                emergencyContact: typedStudentData.emergencyContact,
-                                emergencyPhone: typedStudentData.emergencyPhone,
-                                
-                                // Académico (con valores por defecto)
-                                status: typedStudentData.status || 'pendiente',
-                                admissionDate: typedStudentData.admissionDate ? 
-                                    new Date(typedStudentData.admissionDate) : new Date(),
-                                initialSchoolYear: typedStudentData.initialSchoolYear || 
-                                    new Date().getFullYear().toString(),
-                                currentGrade: typedStudentData.currentGrade || 'En asignar',
-                                section: typedStudentData.section || 'Pendiente',
-                                
-                                // Relaciones
-                                representativeId: representative.id!,
-                                userId: ResultadoDB.id!,
-                            };
-
-                            const newStudent = await Student.create(studentCreateData, { transaction });
-                            
-                            updatedStudentIds.push(newStudent.id!);
-                        }
                     }
+                    */
                 }
-                
-                // Opcional: Eliminar estudiantes que no están en el request
-                // Para activar esta funcionalidad, descomenta el siguiente bloque:
-                /*
-                const studentsToDelete = currentStudentIds.filter(id => !updatedStudentIds.includes(id));
-                if (studentsToDelete.length > 0) {
-                    // Verificar que los estudiantes a eliminar no tengan registros asociados (horarios, pagos, etc.)
-                    // Esta validación depende de tu modelo de datos
-                    await Student.destroy({
-                        where: { 
-                            id: studentsToDelete,
-                            representativeId: representative.id 
-                        },
-                        transaction
-                    });
-                }
-                */
             }
+            
+            await transaction.commit();
+            
+            res.status(200).json({ 
+                result: true, 
+                content: [`El Usuario ${loginData.userlogin}, fue actualizado exitosamente`], 
+                error: [] 
+            });
+        } catch (error) {
+            await transaction.rollback();
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("updatelogin"));
+            res.status(500).json({ result: false, content: [], error: ['Error al Actualizar el usuario'] });
         }
-        
-        await transaction.commit();
-        
-        res.status(200).json({ 
-            result: true, 
-            content: [`El Usuario ${loginData.userlogin}, fue actualizado exitosamente`], 
-            error: [] 
-        });
-    } catch (error) {
-        await transaction.rollback();
-        ErrorLog.createErrorLog(error, 'Server', getErrorLocation("updatelogin"));
-        res.status(500).json({ result: false, content: [], error: ['Error al Actualizar el usuario'] });
-    }
-};
+    };
     //#endregion
     
-//#region: Lista de Usuarios Paginados get('/listpag')
-static async getPaginatedlogin(req: Request, res: Response) {
-    try {
-        type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
-        type OrderDirection = 'ASC' | 'DESC';
-        
-        type FieldConfig = {
-            [key: number]: {
-                field: FieldKeys | 'createdAt';
-                orderDirection: OrderDirection;
-            };
-        };
-
-        const page = parseInt(req.query.page as string, 10) || 1;
-        const limit = parseInt(req.query.limit as string, 10) || 5;
-        const idBus = parseInt(req.query.idBus as string, 10) || 1;
-        const DeBus = (req.query.DeBus as string || '').trim();
-        const nivelFilter = req.query.nivelFilter as string || 'all';
-        const offset = (page - 1) * limit;
-
-        const fieldConfig: FieldConfig = {
-            1: { field: 'usermail', orderDirection: 'ASC' },
-            2: { field: 'userlogin', orderDirection: 'ASC' },
-            3: { field: 'username', orderDirection: 'ASC' },
-            4: { field: 'createdAt', orderDirection: 'DESC' }
-        };
-
-        const config = fieldConfig[idBus] || { 
-            field: 'createdAt' as const, 
-            orderDirection: 'DESC' as OrderDirection 
-        };
-
-        // Construir opciones de consulta PRINCIPAL
-        const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
-            limit,
-            offset,
-            attributes: { exclude: ['userpass'] },
-            include: [
-                {
-                    model: Representative,
-                    as: 'representative',
-                    required: false,
-                    include: [
-                        {
-                            model: Student,
-                            as: 'students',
-                            required: false,
-                            attributes: ['id', 'fullName', 'identityCard', 'birthDate', 'status', 'emergencyContact', 'emergencyPhone', 'currentGrade', 'section']
-                        }
-                    ]
-                }
-            ]
-        };
-
-        queryOptions.order = [[config.field, config.orderDirection]];
-        
-        // Construir condiciones de búsqueda
-        const whereConditions: any = {};
-        
-        // Filtrar por nivel si no es 'all'
-        if (nivelFilter !== 'all') {
-            whereConditions.nivel = nivelFilter;
-        }
-        
-        // Agregar búsqueda por texto
-        if (DeBus) {
-            whereConditions[Op.or] = [
-                { usermail: { [Op.iLike]: `%${DeBus}%` } },
-                { userlogin: { [Op.iLike]: `%${DeBus}%` } },
-                { username: { [Op.iLike]: `%${DeBus}%` } }
-            ];
+    //#region: Lista de Usuarios Paginados get('/listpag')
+    static async getPaginatedlogin(req: Request, res: Response) {
+        try {
+            type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
+            type OrderDirection = 'ASC' | 'DESC';
             
-            // Para representantes, también buscar en representante y cédula
-            if (nivelFilter === '1' || nivelFilter === 'all') {
-                const repCondition = {
-                    model: Representative,
-                    as: 'representative',
-                    required: false,
-                    where: {
-                        [Op.or]: [
-                            { fullName: { [Op.iLike]: `%${DeBus}%` } },
-                            { identityCard: { [Op.iLike]: `%${DeBus}%` } }
+            type FieldConfig = {
+                [key: number]: {
+                    field: FieldKeys | 'createdAt';
+                    orderDirection: OrderDirection;
+                };
+            };
+
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = parseInt(req.query.limit as string, 10) || 5;
+            const idBus = parseInt(req.query.idBus as string, 10) || 1;
+            const DeBus = (req.query.DeBus as string || '').trim();
+            const nivelFilter = req.query.nivelFilter as string || 'all';
+            const offset = (page - 1) * limit;
+
+            const fieldConfig: FieldConfig = {
+                1: { field: 'usermail', orderDirection: 'ASC' },
+                2: { field: 'userlogin', orderDirection: 'ASC' },
+                3: { field: 'username', orderDirection: 'ASC' },
+                4: { field: 'createdAt', orderDirection: 'DESC' }
+            };
+
+            const config = fieldConfig[idBus] || { 
+                field: 'createdAt' as const, 
+                orderDirection: 'DESC' as OrderDirection 
+            };
+
+            // Construir opciones de consulta PRINCIPAL
+            const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
+                limit,
+                offset,
+                attributes: { exclude: ['userpass'] },
+                include: [
+                    {
+                        model: Representative,
+                        as: 'representative',
+                        required: false,
+                        include: [
+                            {
+                                model: Student,
+                                as: 'students',
+                                required: false,
+                                attributes: ['id', 'fullName', 'identityCard', 'birthDate', 'status', 'emergencyContact', 'emergencyPhone', 'currentGrade', 'section']
+                            }
                         ]
                     }
-                };
+                ]
+            };
+
+            queryOptions.order = [[config.field, config.orderDirection]];
+            
+            // Construir condiciones de búsqueda
+            const whereConditions: any = {};
+            
+            // Filtrar por nivel si no es 'all'
+            if (nivelFilter !== 'all') {
+                whereConditions.nivel = nivelFilter;
+            }
+            
+            // Agregar búsqueda por texto
+            if (DeBus) {
+                whereConditions[Op.or] = [
+                    { usermail: { [Op.iLike]: `%${DeBus}%` } },
+                    { userlogin: { [Op.iLike]: `%${DeBus}%` } },
+                    { username: { [Op.iLike]: `%${DeBus}%` } }
+                ];
                 
-                if (!queryOptions.include) queryOptions.include = [];
-                const existingInclude = queryOptions.include as any[];
-                
-                // Reemplazar el include de representative con el nuevo que incluye where
-                const repIndex = existingInclude.findIndex((inc: any) => inc.as === 'representative');
-                if (repIndex !== -1) {
-                    existingInclude[repIndex] = repCondition;
+                // Para representantes, también buscar en representante y cédula
+                if (nivelFilter === '1' || nivelFilter === 'all') {
+                    const repCondition = {
+                        model: Representative,
+                        as: 'representative',
+                        required: false,
+                        where: {
+                            [Op.or]: [
+                                { fullName: { [Op.iLike]: `%${DeBus}%` } },
+                                { identityCard: { [Op.iLike]: `%${DeBus}%` } }
+                            ]
+                        }
+                    };
+                    
+                    if (!queryOptions.include) queryOptions.include = [];
+                    const existingInclude = queryOptions.include as any[];
+                    
+                    // Reemplazar el include de representative con el nuevo que incluye where
+                    const repIndex = existingInclude.findIndex((inc: any) => inc.as === 'representative');
+                    if (repIndex !== -1) {
+                        existingInclude[repIndex] = repCondition;
+                    }
                 }
             }
+            
+            if (Object.keys(whereConditions).length > 0) {
+                queryOptions.where = whereConditions;
+            }
+
+            // Ejecutar la consulta principal
+            const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
+
+            res.status(200).json({
+                result: true,
+                content: rows,
+                pagination: {
+                    totalRecords: count,
+                    currentPage: page,
+                    totalPages: Math.ceil(count / limit),
+                },
+                error: []
+            });
+
+        } catch (error: any) {
+            // Registrar en ErrorLog
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
+            
+            res.status(500).json({ 
+                result: false, 
+                content: [], 
+                error: ['Error al obtener usuarios'] 
+            });
         }
-        
-        if (Object.keys(whereConditions).length > 0) {
-            queryOptions.where = whereConditions;
-        }
-
-        // Ejecutar la consulta principal
-        const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
-
-        res.status(200).json({
-            result: true,
-            content: rows,
-            pagination: {
-                totalRecords: count,
-                currentPage: page,
-                totalPages: Math.ceil(count / limit),
-            },
-            error: []
-        });
-
-    } catch (error: any) {
-        // Registrar en ErrorLog
-        ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
-        
-        res.status(500).json({ 
-            result: false, 
-            content: [], 
-            error: ['Error al obtener usuarios'] 
-        });
     }
-}
-//#endregion
+    //#endregion
 
     //#region: Iniciar Sesion post('/privateauth')
     static SesionIn = async (req: Request, res: Response) => {
@@ -766,13 +766,16 @@ static async getPaginatedlogin(req: Request, res: Response) {
     };
     //#endregion
 
-    //#region: Estadísticas del Sistema
+    //#region: Estadísticas del Sistema - CORREGIDO
     static getStatistics = async (req: Request, res: Response) => {
         try {
             const totalUsers = await UserLogin.count();
             const activeUsers = await UserLogin.count({ where: { userstatus: true } });
             const totalStudents = await Student.count();
-            const activeStudents = await Student.count({ where: { status: true } });
+            // CORRECCIÓN: El campo 'status' es string, no booleano
+            const activeStudents = await Student.count({ where: { status: 'regular' } });
+            const totalTeachers = await Teacher.count();
+            const totalRepresentatives = await Representative.count();
             const usersByLevel = await UserLogin.findAll({
                 attributes: [
                     'nivel',
@@ -791,13 +794,33 @@ static async getPaginatedlogin(req: Request, res: Response) {
                 students: {
                     total: totalStudents,
                     active: activeStudents
+                },
+                teachers: {
+                    total: totalTeachers
+                },
+                representatives: {
+                    total: totalRepresentatives
+                },
+                summary: {
+                    totalUsers: totalUsers,
+                    totalStudents: totalStudents,
+                    totalTeachers: totalTeachers,
+                    totalRepresentatives: totalRepresentatives
                 }
             };
 
-            res.status(200).json({ result: true, content: result, error: [] });
+            res.status(200).json({ 
+                result: true, 
+                content: result, 
+                error: [] 
+            });
         } catch (error) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getStatistics"));
-            res.status(500).json({ result: false, content: [], error: ['Error obteniendo estadísticas'] });
+            res.status(500).json({ 
+                result: false, 
+                content: [], 
+                error: ['Error obteniendo estadísticas'] 
+            });
         }
     };
     //#endregion
@@ -944,92 +967,96 @@ static async getPaginatedlogin(req: Request, res: Response) {
         }
     };
     //#endregion
+    
     //#region: Obtener lista de estudiantes (para dashboard)
-static listStudents = async (req: Request, res: Response) => {
-  try {
-    const { page = 1, limit = 100, status, search } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+    static listStudents = async (req: Request, res: Response) => {
+        try {
+            const { page = 1, limit = 100, status, search } = req.query;
+            const offset = (Number(page) - 1) * Number(limit);
+            
+            const where: any = {};
+            
+            if (status) {
+                where.status = status;
+            }
+            
+            if (search && typeof search === 'string') {
+                where[Op.or] = [
+                    { fullName: { [Op.iLike]: `%${search}%` } },
+                    { identityCard: { [Op.iLike]: `%${search}%` } },
+                    { currentGrade: { [Op.iLike]: `%${search}%` } }
+                ];
+            }
+            
+            const { count, rows: students } = await Student.findAndCountAll({
+                where,
+                limit: Number(limit),
+                offset,
+                order: [['fullName', 'ASC']],
+                attributes: ['id', 'fullName', 'identityCard', 'birthDate', 'status', 'currentGrade', 'section', 'createdAt'],
+                include: [{
+                    model: Representative,
+                    as: 'representative',
+                    attributes: ['id', 'fullName', 'identityCard']
+                }]
+            });
+            
+            res.status(200).json({
+                result: true,
+                content: students,
+                pagination: {
+                    totalRecords: count,
+                    currentPage: Number(page),
+                    totalPages: Math.ceil(count / Number(limit)),
+                },
+                error: []
+            });
+            
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
+            res.status(500).json({ 
+                result: false, 
+                content: [], 
+                error: ['Error al obtener estudiantes'] 
+            });
+        }
+    };
+    //#endregion
     
-    const where: any = {};
-    
-    if (status) {
-      where.status = status;
-    }
-    
-    if (search && typeof search === 'string') {
-      where[Op.or] = [
-        { fullName: { [Op.iLike]: `%${search}%` } },
-        { identityCard: { [Op.iLike]: `%${search}%` } },
-        { currentGrade: { [Op.iLike]: `%${search}%` } }
-      ];
-    }
-    
-    const { count, rows: students } = await Student.findAndCountAll({
-      where,
-      limit: Number(limit),
-      offset,
-      order: [['fullName', 'ASC']],
-      attributes: ['id', 'fullName', 'identityCard', 'birthDate', 'status', 'currentGrade', 'section', 'createdAt'],
-      include: [{
-        model: Representative,
-        as: 'representative',
-        attributes: ['id', 'fullName', 'identityCard']
-      }]
-    });
-    
-    res.status(200).json({
-      result: true,
-      content: students,
-      pagination: {
-        totalRecords: count,
-        currentPage: Number(page),
-        totalPages: Math.ceil(count / Number(limit)),
-      },
-      error: []
-    });
-    
-  } catch (error: any) {
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
-    res.status(500).json({ 
-      result: false, 
-      content: [], 
-      error: ['Error al obtener estudiantes'] 
-    });
-  }
-};
-//#endregion
-  static getUserStatistics = async (req: Request, res: Response) => {
-    try {
-      const totalUsers = await UserLogin.count();
-      const totalStudents = await Student.count();
-      const totalTeachers = await Teacher.count();
-      const totalRepresentatives = await Representative.count();
-      
-      res.status(200).json({
-        result: true,
-        content: {
-          users: {
-            total: totalUsers,
-            students: totalStudents,
-            teachers: totalTeachers,
-            representatives: totalRepresentatives
-          },
-          summary: {
-            totalUsers,
-            totalStudents,
-            totalTeachers,
-            totalRepresentatives
-          }
-        },
-        error: []
-      });
-    } catch (error) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getUserStatistics"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al obtener estadísticas'] 
-      });
-    }
-  };
+    //#region: Estadísticas de usuarios (para dashboard)
+    static getUserStatistics = async (req: Request, res: Response) => {
+        try {
+            const totalUsers = await UserLogin.count();
+            const totalStudents = await Student.count();
+            const totalTeachers = await Teacher.count();
+            const totalRepresentatives = await Representative.count();
+            
+            res.status(200).json({
+                result: true,
+                content: {
+                    users: {
+                        total: totalUsers,
+                        students: totalStudents,
+                        teachers: totalTeachers,
+                        representatives: totalRepresentatives
+                    },
+                    summary: {
+                        totalUsers,
+                        totalStudents,
+                        totalTeachers,
+                        totalRepresentatives
+                    }
+                },
+                error: []
+            });
+        } catch (error) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getUserStatistics"));
+            res.status(500).json({ 
+                result: false, 
+                content: [], 
+                error: ['Error al obtener estadísticas'] 
+            });
+        }
+    };
+    //#endregion
 }
