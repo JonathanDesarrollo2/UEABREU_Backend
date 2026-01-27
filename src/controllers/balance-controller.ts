@@ -8,6 +8,7 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
 import { Op, fn, col, literal } from "sequelize";
+import { PaymentMethod, TransactionType, TransactionStatus } from "../database/models/transaction";
 
 export class BalanceController {
   
@@ -168,7 +169,7 @@ export class BalanceController {
                     balance: { [Op.lt]: 0 }
                 },
                 limit,
-                order: [['balance', 'ASC']], // Ordenar por deuda más alta (negativo más bajo)
+                order: [['balance', 'ASC']],
                 include: [
                     {
                         model: Student,
@@ -311,13 +312,16 @@ export class BalanceController {
                     balanceStatus: representative.balanceStatus,
                     debtAmount: representative.debtAmount || 0,
                     studentCount: representative.students?.length || 0,
-                    userEmail: representative.user?.usermail || ''
+                    userEmail: representative.user?.usermail || '',
+                    students: representative.students || []
                 },
                 recentTransactions: recentTransactions.map((t: any) => ({
                     id: t.id,
                     type: t.type,
                     amount: t.amount,
                     description: t.description,
+                    paymentMethod: t.paymentMethod,
+                    reference: t.reference,
                     status: t.status,
                     createdAt: t.createdAt
                 })),
@@ -531,7 +535,7 @@ export class BalanceController {
         }
     };
 
-    // Depósito manual
+    // Depósito manual - CORREGIDO: valor por defecto 'cash' en lugar de 'efectivo'
     static manualDeposit = async (req: Request, res: Response) => {
         const transaction = await sequelize.transaction();
         
@@ -549,6 +553,17 @@ export class BalanceController {
                 });
             }
             
+            // Validar paymentMethod
+            const validPaymentMethods = Object.values(PaymentMethod);
+            if (paymentMethod && !validPaymentMethods.includes(paymentMethod)) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: [`Método de pago inválido. Valores permitidos: ${validPaymentMethods.join(', ')}`]
+                });
+            }
+            
             // Verificar que el representante exista
             const representative = await Representative.findByPk(id, { transaction });
             if (!representative) {
@@ -563,12 +578,12 @@ export class BalanceController {
             // Crear transacción
             const newTransaction = await Transaction.create({
                 representativeId: id,
-                type: 'deposit',
+                type: TransactionType.DEPOSIT,
                 amount: amount,
                 description: description || 'Depósito manual',
-                paymentMethod: paymentMethod || 'efectivo',
+                paymentMethod: paymentMethod || PaymentMethod.CASH, // CORREGIDO: 'cash' no 'efectivo'
                 reference: reference || `MANUAL-${Date.now()}`,
-                status: 'completed',
+                status: TransactionStatus.COMPLETED,
                 createdBy: createdBy || 'system',
                 balanceBefore: representative.balance || 0,
                 balanceAfter: (representative.balance || 0) + amount
@@ -602,7 +617,7 @@ export class BalanceController {
         }
     };
 
-    // Retiro manual
+    // Retiro manual - CORREGIDO: valor por defecto 'cash' en lugar de 'efectivo'
     static manualWithdrawal = async (req: Request, res: Response) => {
         const transaction = await sequelize.transaction();
         
@@ -617,6 +632,17 @@ export class BalanceController {
                     result: false,
                     content: [],
                     error: ['El monto debe ser mayor a 0']
+                });
+            }
+            
+            // Validar paymentMethod
+            const validPaymentMethods = Object.values(PaymentMethod);
+            if (paymentMethod && !validPaymentMethods.includes(paymentMethod)) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: [`Método de pago inválido. Valores permitidos: ${validPaymentMethods.join(', ')}`]
                 });
             }
             
@@ -644,12 +670,12 @@ export class BalanceController {
             // Crear transacción
             const newTransaction = await Transaction.create({
                 representativeId: id,
-                type: 'withdrawal',
+                type: TransactionType.WITHDRAWAL,
                 amount: amount,
                 description: description || 'Retiro manual',
-                paymentMethod: paymentMethod || 'efectivo',
+                paymentMethod: paymentMethod || PaymentMethod.CASH, // CORREGIDO: 'cash' no 'efectivo'
                 reference: reference || `MANUAL-${Date.now()}`,
-                status: 'completed',
+                status: TransactionStatus.COMPLETED,
                 createdBy: createdBy || 'system',
                 balanceBefore: representative.balance || 0,
                 balanceAfter: (representative.balance || 0) - amount

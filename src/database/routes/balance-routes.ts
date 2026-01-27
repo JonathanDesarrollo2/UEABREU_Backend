@@ -129,13 +129,12 @@ router.get('/statistics/financial',
   BalanceController.getFinancialStatistics
 );
 
-// Transacciones recientes (para dashboard) - CAMBIADO
+// Transacciones recientes (para dashboard)
 router.get('/transactions/recent',
   authsession,
   query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
   validateRoutes,
   BalanceController.getRecentTransactions
 );
-
 
 export default router;
