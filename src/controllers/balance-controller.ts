@@ -535,13 +535,15 @@ export class BalanceController {
         }
     };
 
-    // Depósito manual - CORREGIDO: valor por defecto 'cash' en lugar de 'efectivo'
+    // Depósito manual - CORREGIDO: 'system' → null
     static manualDeposit = async (req: Request, res: Response) => {
         const transaction = await sequelize.transaction();
         
         try {
             const { id } = req.params;
             const { amount, description, paymentMethod, reference, createdBy } = req.body;
+            
+            console.log('📥 Datos recibidos para depósito:', { id, amount, description, paymentMethod, reference, createdBy });
             
             // Validaciones
             if (!amount || amount <= 0) {
@@ -550,17 +552,6 @@ export class BalanceController {
                     result: false,
                     content: [],
                     error: ['El monto debe ser mayor a 0']
-                });
-            }
-            
-            // Validar paymentMethod
-            const validPaymentMethods = Object.values(PaymentMethod);
-            if (paymentMethod && !validPaymentMethods.includes(paymentMethod)) {
-                await transaction.rollback();
-                return res.status(400).json({
-                    result: false,
-                    content: [],
-                    error: [`Método de pago inválido. Valores permitidos: ${validPaymentMethods.join(', ')}`]
                 });
             }
             
@@ -575,16 +566,31 @@ export class BalanceController {
                 });
             }
             
-            // Crear transacción
+            // Validar que createdBy sea UUID válido o null
+            let validCreatedBy = null;
+            if (createdBy) {
+                // Validar formato UUID
+                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                if (uuidRegex.test(createdBy)) {
+                    validCreatedBy = createdBy;
+                } else {
+                    console.warn('⚠️ createdBy no es un UUID válido:', createdBy);
+                    validCreatedBy = null;
+                }
+            }
+            
+            console.log('💰 Creando transacción con createdBy:', validCreatedBy);
+            
+            // Crear transacción - CORREGIDO: 'system' cambiado a null
             const newTransaction = await Transaction.create({
                 representativeId: id,
-                type: TransactionType.DEPOSIT,
+                type: 'deposit',
                 amount: amount,
                 description: description || 'Depósito manual',
-                paymentMethod: paymentMethod || PaymentMethod.CASH, // CORREGIDO: 'cash' no 'efectivo'
+                paymentMethod: paymentMethod || 'cash',
                 reference: reference || `MANUAL-${Date.now()}`,
-                status: TransactionStatus.COMPLETED,
-                createdBy: createdBy || 'system',
+                status: 'completed',
+                createdBy: validCreatedBy, // NUNCA usar 'system'
                 balanceBefore: representative.balance || 0,
                 balanceAfter: (representative.balance || 0) + amount
             }, { transaction });
@@ -595,6 +601,8 @@ export class BalanceController {
             }, { transaction });
             
             await transaction.commit();
+            
+            console.log('✅ Depósito exitoso. Nuevo saldo:', representative.balance);
             
             res.status(200).json({
                 result: true,
@@ -608,6 +616,7 @@ export class BalanceController {
             
         } catch (error: any) {
             await transaction.rollback();
+            console.error('❌ Error en manualDeposit:', error);
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
             res.status(500).json({
                 result: false,
@@ -617,13 +626,15 @@ export class BalanceController {
         }
     };
 
-    // Retiro manual - CORREGIDO: valor por defecto 'cash' en lugar de 'efectivo'
+    // Retiro manual - CORREGIDO: 'system' → null
     static manualWithdrawal = async (req: Request, res: Response) => {
         const transaction = await sequelize.transaction();
         
         try {
             const { id } = req.params;
             const { amount, description, paymentMethod, reference, createdBy } = req.body;
+            
+            console.log('📥 Datos recibidos para retiro:', { id, amount, description, paymentMethod, reference, createdBy });
             
             // Validaciones
             if (!amount || amount <= 0) {
@@ -632,17 +643,6 @@ export class BalanceController {
                     result: false,
                     content: [],
                     error: ['El monto debe ser mayor a 0']
-                });
-            }
-            
-            // Validar paymentMethod
-            const validPaymentMethods = Object.values(PaymentMethod);
-            if (paymentMethod && !validPaymentMethods.includes(paymentMethod)) {
-                await transaction.rollback();
-                return res.status(400).json({
-                    result: false,
-                    content: [],
-                    error: [`Método de pago inválido. Valores permitidos: ${validPaymentMethods.join(', ')}`]
                 });
             }
             
@@ -667,16 +667,31 @@ export class BalanceController {
                 });
             }
             
-            // Crear transacción
+            // Validar que createdBy sea UUID válido o null
+            let validCreatedBy = null;
+            if (createdBy) {
+                // Validar formato UUID
+                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                if (uuidRegex.test(createdBy)) {
+                    validCreatedBy = createdBy;
+                } else {
+                    console.warn('⚠️ createdBy no es un UUID válido:', createdBy);
+                    validCreatedBy = null;
+                }
+            }
+            
+            console.log('💰 Creando transacción con createdBy:', validCreatedBy);
+            
+            // Crear transacción - CORREGIDO: 'system' cambiado a null
             const newTransaction = await Transaction.create({
                 representativeId: id,
-                type: TransactionType.WITHDRAWAL,
+                type: 'withdrawal',
                 amount: amount,
                 description: description || 'Retiro manual',
-                paymentMethod: paymentMethod || PaymentMethod.CASH, // CORREGIDO: 'cash' no 'efectivo'
+                paymentMethod: paymentMethod || 'cash',
                 reference: reference || `MANUAL-${Date.now()}`,
-                status: TransactionStatus.COMPLETED,
-                createdBy: createdBy || 'system',
+                status: 'completed',
+                createdBy: validCreatedBy, // NUNCA usar 'system'
                 balanceBefore: representative.balance || 0,
                 balanceAfter: (representative.balance || 0) - amount
             }, { transaction });
@@ -687,6 +702,8 @@ export class BalanceController {
             }, { transaction });
             
             await transaction.commit();
+            
+            console.log('✅ Retiro exitoso. Nuevo saldo:', representative.balance);
             
             res.status(200).json({
                 result: true,
@@ -700,6 +717,7 @@ export class BalanceController {
             
         } catch (error: any) {
             await transaction.rollback();
+            console.error('❌ Error en manualWithdrawal:', error);
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualWithdrawal"));
             res.status(500).json({
                 result: false,
