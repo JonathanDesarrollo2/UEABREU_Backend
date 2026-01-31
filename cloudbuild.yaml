@@ -21,7 +21,7 @@ steps:
   - 'managed'
   - '--allow-unauthenticated'
   - '--set-env-vars'
-  - 'FRONTEND_URL1=https://ueabreu.com,FRONTEND_URL2=https://www.ueabreu.com,FRONTEND_URL3=http://localhost:5173,BACKEND_URL=http://localhost:8080,BACKEND_URL1=https://api.ueabreu.com,SESION_SECRETKEY=SesionesUEABREU,JWT_EXPIRES_IN=1h,NODE_ENV=production,DB_HOST=dpg-d5j885idbo4c73ekpnj0-a.virginia-postgres.render.com,DB_PORT=5432,DB_USER=ueabreu,DB_PASSWORD=suvFiITk8Kp8MF10HjY0UOi7AIDilfJ9,DB_NAME=ueabreudb_0upy'
+  - 'FRONTEND_URL1=https://ueabreu.com,FRONTEND_URL2=https://www.ueabreu.com,FRONTEND_URL3=http://localhost:5173,BACKEND_URL=http://localhost:8080,BACKEND_URL1=https://api.ueabreu.com,SESION_SECRETKEY=SesionesUEABREU,JWT_EXPIRES_IN=1h,NODE_ENV=production,DB_HOST=dpg-d5sid6vgi27c73cb8540-a.oregon-postgres.render.com,DB_PORT=5432,DB_USER=ueabreu,DB_PASSWORD=L8fersYggb6iamcKjYTkfZzEyyRuGyuq,DB_NAME=ueabreudb_bphm'
 
 # Lista de imágenes producidas (también actualizada)
 images:
