@@ -21,9 +21,9 @@ steps:
   - 'managed'
   - '--allow-unauthenticated'
   - '--set-env-vars'
-  - 'FRONTEND_URL1=https://ueabreu.com,FRONTEND_URL2=https://www.ueabreu.com,FRONTEND_URL3=http://localhost:5173,BACKEND_URL=http://localhost:8080,BACKEND_URL1=https://api.ueabreu.com,SESION_SECRETKEY=SesionesUEABREU,JWT_EXPIRES_IN=1h,NODE_ENV=production,DB_HOST=dpg-d5sid6vgi27c73cb8540-a.oregon-postgres.render.com,DB_PORT=5432,DB_USER=ueabreu,DB_PASSWORD=L8fersYggb6iamcKjYTkfZzEyyRuGyuq,DB_NAME=ueabreudb_bphm'
+  - 'FRONTEND_URL1=https://ueabreu.com,FRONTEND_URL2=https://www.ueabreu.com,FRONTEND_URL3=http://localhost:5173,BACKEND_URL=http://localhost:8080,BACKEND_URL1=https://api.ueabreu.com,SESION_SECRETKEY=SesionesUEABREU,JWT_EXPIRES_IN=1h,NODE_ENV=production,DB_HOST=dpg-d5sid6vgi27c73cb8540-a.oregon-postgres.render.com,DB_PORT=5432,DB_USER=ueabreu,DB_PASSWORD=L8fersYggb6iamcKjYTkfZzEyyRuGyuq,DB_NAME=ueabreudb_bphm,BNC_CLIENT_GUID=4A074C46-DD4E-4E54-8010-B80A6A8758F4,BNC_MASTER_KEY=328bf099102990d926f3499379594204,BNC_BASE_URL=https://servicios.bncenlinea.com:16500/api,BNC_TEST_MODE=true'
 
-# Lista de imágenes producidas (también actualizada)
+# Lista de imágenes producidas
 images:
 - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:latest'
 
