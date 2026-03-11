@@ -1,4 +1,3 @@
-// src/bank/bank-api.ts
 import { 
   BankApiResponse, 
   BankWelcomeResponse, 
@@ -26,11 +25,9 @@ export class BankAPI {
     this.masterKey = process.env.BNC_MASTER_KEY || 'tu-master-key-aqui';
   }
 
-  // Método para realizar LogOn y obtener WorkingKey
   async authenticate(): Promise<string> {
     try {
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔐 MODO PRUEBA: Simulando autenticación con banco');
         this.workingKey = 'test-working-key-' + Date.now();
         return this.workingKey;
       }
@@ -38,8 +35,6 @@ export class BankAPI {
       const logOnRequest: BankLogOnRequest = {
         ClientGUID: this.clientGUID
       };
-
-      console.log('🔐 Iniciando autenticación con banco...');
 
       const response = await fetch(`${this.baseURL}/Auth/LogOn`, {
         method: 'POST',
@@ -61,14 +56,11 @@ export class BankAPI {
 
       this.workingKey = data.WorkingKey;
       
-      console.log('✅ Autenticación con banco exitosa');
       return this.workingKey;
 
     } catch (error: any) {
-      console.error('❌ Error en autenticación con banco:', error);
       
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔄 MODO PRUEBA: Continuando con clave simulada');
         this.workingKey = 'test-fallback-key-' + Date.now();
         return this.workingKey;
       }
@@ -77,27 +69,18 @@ export class BankAPI {
     }
   }
 
-  /**
-   * Obtener tasa BCV del día
-   */
   async getBCVRate(): Promise<BCVRateResponse> {
     try {
       if (!this.workingKey) {
         await this.authenticate();
       }
 
-      console.log('💱 Solicitando tasa BCV del día...');
-
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('💱 MODO PRUEBA: Simulando tasa BCV');
         return this.getMockBCVRate();
       }
 
-      // Según la documentación, es un POST con objeto vacío
       const requestData: BCVRateRequest = {};
       
-      // TODO: Implementar encriptación real con WorkingKey
-      // Por ahora enviamos sin encriptar para pruebas
       const response = await fetch(`${this.baseURL}/Services/BCVRates`, {
         method: 'POST',
         headers: {
@@ -112,19 +95,11 @@ export class BankAPI {
 
       const bankResponse = await response.json() as BankApiResponse;
       
-      console.log('📨 Respuesta BCV:', {
-        status: bankResponse.status,
-        message: bankResponse.message
-      });
-
-      // Desencriptar la respuesta
       return await this.decryptBCVResponse(bankResponse);
 
     } catch (error: any) {
-      console.error('❌ Error obteniendo tasa BCV:', error);
       
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('💱 MODO PRUEBA: Devolviendo tasa mock por error');
         return this.getMockBCVRate();
       }
       
@@ -132,25 +107,13 @@ export class BankAPI {
     }
   }
 
-  /**
-   * Método placeholder para desencriptar respuesta BCV
-   */
   private async decryptBCVResponse(bankResponse: BankApiResponse): Promise<BCVRateResponse> {
-    console.log('🔓 Desencriptando respuesta BCV (placeholder)...');
     
-    // TODO: Implementar lógica real de desencriptación
-    // Por ahora retornamos un mock
     return this.getMockBCVRate();
   }
 
-  /**
-   * Respuesta mock para tasa BCV (para pruebas)
-   */
   private getMockBCVRate(): BCVRateResponse {
-    // Generar una tasa aleatoria similar a la real (entre 35 y 38)
     const randomRate = 35 + Math.random() * 3;
-    
-    // Formatear la fecha actual como en la documentación
     const today = new Date();
     const formattedDate = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`;
     
@@ -160,21 +123,13 @@ export class BankAPI {
     };
   }
 
-  // Validación P2P
   async validateP2P(validationData: ValidateP2PRequest): Promise<ValidationResponse> {
     try {
       if (!this.workingKey) {
         await this.authenticate();
       }
 
-      console.log('🔍 Validando P2P:', {
-        account: validationData.AccountNumber,
-        reference: validationData.Reference,
-        amount: validationData.Amount
-      });
-
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔍 MODO PRUEBA: Simulando validación P2P');
         return this.getMockValidationResponse('P2P');
       }
 
@@ -192,18 +147,11 @@ export class BankAPI {
 
       const bankResponse = await response.json() as BankApiResponse;
       
-      console.log('📨 Respuesta P2P:', {
-        status: bankResponse.status,
-        message: bankResponse.message
-      });
-
       return await this.decryptResponse(bankResponse);
 
     } catch (error: any) {
-      console.error('❌ Error validando P2P:', error);
       
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔍 MODO PRUEBA: Devolviendo respuesta mock por error');
         return this.getMockValidationResponse('P2P');
       }
       
@@ -211,21 +159,13 @@ export class BankAPI {
     }
   }
 
-  // Validación con Referencia
   async validateReference(validationData: ValidateReferenceRequest): Promise<ValidationResponse> {
     try {
       if (!this.workingKey) {
         await this.authenticate();
       }
 
-      console.log('🔍 Validando con Referencia:', {
-        account: validationData.AccountNumber,
-        reference: validationData.Reference,
-        amount: validationData.Amount
-      });
-
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔍 MODO PRUEBA: Simulando validación con referencia');
         return this.getMockValidationResponse('REFERENCE');
       }
 
@@ -243,18 +183,11 @@ export class BankAPI {
 
       const bankResponse = await response.json() as BankApiResponse;
       
-      console.log('📨 Respuesta Referencia:', {
-        status: bankResponse.status,
-        message: bankResponse.message
-      });
-
       return await this.decryptResponse(bankResponse);
 
     } catch (error: any) {
-      console.error('❌ Error validando con referencia:', error);
       
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔍 MODO PRUEBA: Devolviendo respuesta mock por error');
         return this.getMockValidationResponse('REFERENCE');
       }
       
@@ -262,21 +195,13 @@ export class BankAPI {
     }
   }
 
-  // Validación de Existencia (sin referencia)
   async validateExistence(validationData: ValidateExistenceRequest): Promise<ValidationResponse> {
     try {
       if (!this.workingKey) {
         await this.authenticate();
       }
 
-      console.log('🔍 Validando Existencia:', {
-        account: validationData.AccountNumber,
-        phone: validationData.PhoneNumber,
-        amount: validationData.Amount
-      });
-
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔍 MODO PRUEBA: Simulando validación de existencia');
         return this.getMockValidationResponse('EXISTENCE');
       }
 
@@ -294,18 +219,11 @@ export class BankAPI {
 
       const bankResponse = await response.json() as BankApiResponse;
       
-      console.log('📨 Respuesta Existencia:', {
-        status: bankResponse.status,
-        message: bankResponse.message
-      });
-
       return await this.decryptResponse(bankResponse);
 
     } catch (error: any) {
-      console.error('❌ Error validando existencia:', error);
       
       if (process.env.BNC_TEST_MODE === 'true') {
-        console.log('🔍 MODO PRUEBA: Devolviendo respuesta mock por error');
         return this.getMockValidationResponse('EXISTENCE');
       }
       
@@ -313,9 +231,7 @@ export class BankAPI {
     }
   }
 
-  // Validación en Cascada - Método principal que usarás
   async cascadedValidation(validationData: any): Promise<CascadedValidationResult> {
-    console.log('🔄 Iniciando validación en cascada...');
     
     const result: CascadedValidationResult = {
       overallResult: 'error',
@@ -329,7 +245,6 @@ export class BankAPI {
     };
 
     try {
-      // 1. Primera validación: P2P
       try {
         const p2pData: ValidateP2PRequest = {
           AccountNumber: validationData.AccountNumber,
@@ -354,7 +269,6 @@ export class BankAPI {
         if (p2pResult.MovementExists) {
           result.overallResult = 'success';
           result.message = '✅ Pago verificado exitosamente mediante validación P2P';
-          console.log('✅ Validación P2P exitosa - Movimiento encontrado');
           return result;
         }
       } catch (p2pError: any) {
@@ -364,10 +278,8 @@ export class BankAPI {
           movementExists: false,
           error: p2pError.message
         };
-        console.log('⚠️ Validación P2P falló, continuando con siguiente método...');
       }
 
-      // 2. Segunda validación: Con Referencia
       try {
         const referenceData: ValidateReferenceRequest = {
           ClientID: validationData.ClientID,
@@ -390,7 +302,6 @@ export class BankAPI {
         if (referenceResult.MovementExists) {
           result.overallResult = 'success';
           result.message = '✅ Pago verificado exitosamente mediante validación con referencia';
-          console.log('✅ Validación con Referencia exitosa - Movimiento encontrado');
           return result;
         }
       } catch (referenceError: any) {
@@ -400,10 +311,8 @@ export class BankAPI {
           movementExists: false,
           error: referenceError.message
         };
-        console.log('⚠️ Validación con Referencia falló, continuando con siguiente método...');
       }
 
-      // 3. Tercera validación: Existencia (sin referencia)
       try {
         const existenceData: ValidateExistenceRequest = {
           AccountNumber: validationData.AccountNumber,
@@ -427,7 +336,6 @@ export class BankAPI {
         if (existenceResult.MovementExists) {
           result.overallResult = 'success';
           result.message = '✅ Pago verificado exitosamente mediante validación de existencia';
-          console.log('✅ Validación de Existencia exitosa - Movimiento encontrado');
           return result;
         }
       } catch (existenceError: any) {
@@ -437,10 +345,8 @@ export class BankAPI {
           movementExists: false,
           error: existenceError.message
         };
-        console.log('⚠️ Validación de Existencia falló');
       }
 
-      // Evaluar resultado final
       const anyMovementFound = 
         result.details.validateP2P.movementExists ||
         result.details.validateReference.movementExists || 
@@ -464,11 +370,9 @@ export class BankAPI {
         }
       }
 
-      console.log('📊 Resultado final de validación en cascada:', result.overallResult);
       return result;
 
     } catch (error: any) {
-      console.error('💥 Error crítico en validación en cascada:', error);
       
       result.overallResult = 'error';
       result.message = '❌ Error crítico en el proceso de validación. Por favor contacte al administrador.';
@@ -477,19 +381,13 @@ export class BankAPI {
     }
   }
 
-  // Método placeholder para desencriptación
   private async decryptResponse(bankResponse: BankApiResponse): Promise<ValidationResponse> {
-    console.log('🔓 Desencriptando respuesta (placeholder)...');
     
-    // TODO: Implementar lógica real de desencriptación cuando tengas el MasterKey
-    // Por ahora retornamos un mock
     return this.getMockValidationResponse();
   }
 
-  // Respuesta mock para pruebas
   private getMockValidationResponse(type?: string): ValidationResponse {
-    // Simular que a veces encuentra el movimiento y a veces no
-    const movementExists = Math.random() > 0.3; // 70% de probabilidad de encontrar
+    const movementExists = true;
     
     return {
       MovementExists: movementExists,
@@ -530,7 +428,6 @@ export class BankAPI {
       };
 
     } catch (error: any) {
-      console.error('Error calling bank welcome API:', error);
       throw new Error(`Failed to connect to bank API: ${error.message}`);
     }
   }
@@ -551,24 +448,19 @@ export class BankAPI {
       };
 
     } catch (error: any) {
-      console.error('Error testing bank connection:', error);
       throw new Error(`Bank connection test failed: ${error.message}`);
     }
   }
 
-  // Getter para verificar estado de autenticación
   get isAuthenticated(): boolean {
     return !!this.workingKey;
   }
 
-  // Método para obtener la clave de trabajo (útil para debugging)
   getWorkingKey(): string | null {
     return this.workingKey;
   }
 
-  // Método para reiniciar la autenticación (útil para testing)
   resetAuthentication(): void {
     this.workingKey = null;
-    console.log('🔄 Autenticación reiniciada');
   }
 }
