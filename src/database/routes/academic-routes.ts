@@ -135,6 +135,13 @@ AcademicRouter.get('/schedule/list',
   ScheduleController.getSchedules
 );
 
+// 🎯 **RUTA FIJA: Horarios de los hijos del representante (DEBE IR ANTES DE /:id)**
+AcademicRouter.get('/schedule/my-children',
+  authsession,
+  ScheduleController.getChildrenSchedules
+);
+
+// Ruta con parámetro :id (DEBE IR DESPUÉS DE LAS RUTAS FIJAS)
 AcademicRouter.get('/schedule/:id',
   authsession,
   param('id').isUUID().withMessage('ID inválido'),
@@ -166,12 +173,6 @@ AcademicRouter.get('/schedule/grade/:grade/section/:section',
   param('section').isString().withMessage('Sección inválida'),
   validateRoutes,
   ScheduleController.getSchedulesByGradeSection
-);
-
-// 🎯 **RUTA CLAVE: Horarios de los hijos del representante**
-AcademicRouter.get('/schedule/my-children',
-  authsession,
-  ScheduleController.getChildrenSchedules
 );
 
 // Asignar estudiante a horario
