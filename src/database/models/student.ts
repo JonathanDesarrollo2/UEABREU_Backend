@@ -116,15 +116,15 @@ export default class Student extends Model<typestudent_full> {
 
   // 💰 NUEVO CAMPO: Balance individual del estudiante
   @AllowNull(false)
-  @Default(0.00)
-  @Column({ 
-    type: DataType.DECIMAL(12, 2),
-    get() {
-      const value = this.getDataValue('balance');
-      return value !== null && value !== undefined ? parseFloat(value) : 0.00;
-    }
-  })
-  declare balance?: number;
+@Default(0.00)
+@Column({ 
+  type: DataType.DECIMAL(12, 2),
+  get() {
+    const value = this.getDataValue('balance');
+    return value !== null && value !== undefined ? parseFloat(value) : 0.00;
+  }
+})
+declare balance?: number;
 
   // Relaciones
   @ForeignKey(() => Representative)
