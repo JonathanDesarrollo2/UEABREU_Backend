@@ -10,15 +10,10 @@ export interface typerepresentative_full {
     parentIdentityCard?: string;
     parentAddress?: string;
     parentPhone?: string;
-    balance?: number;                    // SALDO (puede ser negativo o positivo)
+    // balance ELIMINADO de aquí
     userId?: string;
     createdAt?: Date;
     updatedAt?: Date;
-    
-    // Campos virtuales (NO los pongas en el modelo real, solo en la interfaz)
-    debtAmount?: number;
-    balanceStatus?: 'debt' | 'zero' | 'credit';
-    balanceFormatted?: string;
 }
 
 export interface typerepresentative_create {
@@ -31,7 +26,7 @@ export interface typerepresentative_create {
     parentIdentityCard?: string;
     parentAddress?: string;
     parentPhone?: string;
-    balance?: number;                    // Opcional al crear, por defecto 0
+    // balance ELIMINADO de aquí
 }
 
 export interface typerepresentative_update {
@@ -41,12 +36,12 @@ export interface typerepresentative_update {
     phone?: string;
     parentName?: string;
     parentPhone?: string;
-    balance?: number;                    // Puede actualizar saldo
+    // balance ELIMINADO de aquí
 }
 
 export interface typerepresentative_balance {
     representativeId: string;
-    amount: number;                     // Positivo para agregar, Negativo para restar
+    amount: number;
     description: string;
     reference?: string;
     paymentMethod?: string;

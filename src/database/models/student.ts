@@ -107,13 +107,24 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.STRING(10) })
   declare section?: string;
 
-  // CORRECCIÓN: Añade 'pendiente' al enum
   @AllowNull(false)
   @Default('pendiente')
   @Column({ 
     type: DataType.ENUM('pendiente', 'regular', 'repitiente', 'condicionado', 'inactivo')
   })
   declare status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo';
+
+  // 💰 NUEVO CAMPO: Balance individual del estudiante
+  @AllowNull(false)
+  @Default(0.00)
+  @Column({ 
+    type: DataType.DECIMAL(12, 2),
+    get() {
+      const value = this.getDataValue('balance');
+      return value !== null && value !== undefined ? parseFloat(value) : 0.00;
+    }
+  })
+  declare balance?: number;
 
   // Relaciones
   @ForeignKey(() => Representative)
@@ -132,24 +143,22 @@ export default class Student extends Model<typestudent_full> {
   @BelongsTo(() => UserLogin)
   declare user?: UserLogin;
 
-  // En tu modelo Student.ts existente, agrega estos campos:
-@AllowNull(true)
-@Column({ type: DataType.TEXT })
-declare comment1?: string;
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare comment1?: string;
 
-@AllowNull(true)
-@Column({ type: DataType.TEXT })
-declare comment2?: string;
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare comment2?: string;
 
-@AllowNull(true)
-@Column({ type: DataType.TEXT })
-declare comment3?: string;
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare comment3?: string;
 
-@AllowNull(true)
-@Column({ type: DataType.STRING(50) })
-declare class?: string; // Para agrupación administrativa
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(50) })
+  declare class?: string;
 
-// Y la relación con StudentSchedule
-@HasMany(() => StudentSchedule)
-declare studentSchedules?: StudentSchedule[];
+  @HasMany(() => StudentSchedule)
+  declare studentSchedules?: StudentSchedule[];
 }

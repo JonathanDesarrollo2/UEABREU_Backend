@@ -14,6 +14,12 @@ import Teacher from "../database/models/teacher";
 
 //#endregion
 
+// Helper para obtener el balance total de un representante (suma de balances de sus estudiantes)
+const getTotalBalance = async (representativeId: string): Promise<number> => {
+  const students = await Student.findAll({ where: { representativeId } });
+  return students.reduce((sum, s) => sum + (s.balance || 0), 0);
+};
+
 export class User {
     //#region: Crear usuarios Nuevos post('/adduser')
     static adduser = async (req: Request, res: Response) => {
@@ -83,7 +89,7 @@ export class User {
                     });
                     
                     if (!existingRep) {
-                        // Crear el representante CON SALDO
+                        // Crear el representante SIN BALANCE
                         try {
                             const newRepresentative = await Representative.create({
                                 fullName: representativeData.fullName,
@@ -95,12 +101,15 @@ export class User {
                                 parentIdentityCard: representativeData.parentIdentityCard,
                                 parentAddress: representativeData.parentAddress,
                                 parentPhone: representativeData.parentPhone,
-                                balance: representativeData.initialBalance || 0.00,
                                 userId: newUser.id
                             }, { transaction });
 
-                            // CREAR ESTUDIANTES
+                            // CREAR ESTUDIANTES con balance individual
                             if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
+                                // Distribuir el initialBalance entre los estudiantes (si existe)
+                                const initialBalance = representativeData.initialBalance || 0;
+                                const perStudentBalance = studentsData.length > 0 ? initialBalance / studentsData.length : 0;
+
                                 for (const studentData of studentsData) {
                                     if (!studentData.identityCard || !studentData.fullName) {
                                         continue;
@@ -135,8 +144,9 @@ export class User {
                                                 status: 'pendiente',
                                                 admissionDate: new Date(),
                                                 initialSchoolYear: new Date().getFullYear().toString(),
-                                                currentGrade: 'En asignar',
-                                                section: 'Pendiente',
+                                                currentGrade: studentData.currentGrade || 'En asignar',
+                                                section: studentData.section || 'Pendiente',
+                                                balance: perStudentBalance // Asignar parte del initialBalance
                                             }, { transaction });
                                         } catch (studentError: any) {
                                             // Continuamos con el siguiente estudiante
@@ -268,13 +278,14 @@ export class User {
                         transaction
                     });
                     
-                    // Verificar si tiene deuda (balance negativo)
-                    if ((representative.balance || 0) < 0) {
+                    // Verificar si tiene deuda (balance total negativo)
+                    const totalBalance = await getTotalBalance(representative.id!);
+                    if (totalBalance < 0) {
                         await transaction.rollback();
                         res.status(202).json({ 
                             result: false, 
                             content: [], 
-                            error: [`No se puede eliminar el representante ${representative.fullName} porque tiene una deuda de ${Math.abs(representative.balance || 0)}`] 
+                            error: [`No se puede eliminar el representante ${representative.fullName} porque tiene una deuda de ${Math.abs(totalBalance)}`] 
                         });
                         return;
                     }
@@ -344,12 +355,14 @@ export class User {
                             transaction
                         });
                         
-                        if ((representative.balance || 0) < 0 || studentCount > 0) {
+                        const totalBalance = await getTotalBalance(representative.id!);
+                        
+                        if (totalBalance < 0 || studentCount > 0) {
                             await transaction.rollback();
                             res.status(202).json({ 
                                 result: false, 
                                 content: [], 
-                                error: [`No se puede cambiar el nivel del usuario porque tiene ${studentCount} estudiante(s) y/o una deuda de ${Math.abs(representative.balance || 0)}`] 
+                                error: [`No se puede cambiar el nivel del usuario porque tiene ${studentCount} estudiante(s) y/o una deuda de ${Math.abs(totalBalance)}`] 
                             });
                             return;
                         }
@@ -369,14 +382,14 @@ export class User {
                 });
                 
                 if (representative) {
-                    // Actualizar datos del representante
-                    await representative.update(representativeData, { transaction });
+                    // Actualizar datos del representante (sin balance)
+                    const { initialBalance, ...repUpdate } = representativeData;
+                    await representative.update(repUpdate, { transaction });
                 } else if (representativeData.identityCard && representativeData.fullName) {
-                    // Crear representante si no existe
+                    // Crear representante si no existe (sin balance)
                     representative = await Representative.create({
                         ...representativeData,
                         userId: ResultadoDB.id,
-                        balance: representativeData.initialBalance || 0.00
                     }, { transaction });
                 }
                 
@@ -388,12 +401,11 @@ export class User {
                         transaction
                     });
                     
-                    const currentStudentIds = currentStudents.map(s => s.id);
+                    const currentStudentIds = currentStudents.map(s => s.id!);
                     const updatedStudentIds: string[] = [];
                     
                     // Procesar cada estudiante del request
                     for (const studentData of studentsData) {
-                        // Crear un tipo explícito para studentData con todos los campos posibles
                         const typedStudentData = studentData as any;
                         
                         if (typedStudentData.id && currentStudentIds.includes(typedStudentData.id)) {
@@ -407,10 +419,8 @@ export class User {
                             });
                             
                             if (existingStudent) {
-                                // Preparar datos de actualización con fechas convertidas
                                 const updateData: any = { ...typedStudentData };
                                 
-                                // Convertir fechas si vienen como string
                                 if (typedStudentData.birthDate && typeof typedStudentData.birthDate === 'string') {
                                     updateData.birthDate = new Date(typedStudentData.birthDate);
                                 }
@@ -419,50 +429,40 @@ export class User {
                                     updateData.admissionDate = new Date(typedStudentData.admissionDate);
                                 }
                                 
-                                // Si no viene admissionDate, mantener el valor actual
                                 if (!typedStudentData.admissionDate) {
-                                    delete updateData.admissionDate; // No actualizar si no se envía
+                                    delete updateData.admissionDate;
                                 }
+                                
+                                // No permitir actualizar el balance desde aquí; se maneja en transacciones
+                                delete updateData.balance;
                                 
                                 await existingStudent.update(updateData, { transaction });
                                 updatedStudentIds.push(typedStudentData.id);
                             }
                         } else if (!typedStudentData.id && typedStudentData.identityCard && typedStudentData.fullName) {
-                            // Crear nuevo estudiante (verificar cédula única)
+                            // Crear nuevo estudiante
                             const existingStudentById = await Student.findOne({
                                 where: { identityCard: typedStudentData.identityCard },
                                 transaction
                             });
                             
                             if (!existingStudentById) {
-                                // PREPARAR DATOS CON TIPOS CORRECTOS
                                 const studentCreateData = {
-                                    // Información Personal
                                     fullName: typedStudentData.fullName,
                                     identityCard: typedStudentData.identityCard,
                                     birthDate: new Date(typedStudentData.birthDate),
-                                    
-                                    // Dirección
                                     state: typedStudentData.state,
                                     zone: typedStudentData.zone,
                                     addressDescription: typedStudentData.addressDescription,
                                     phone: typedStudentData.phone || '',
-                                    
-                                    // Nacionalidad
                                     nationality: typedStudentData.nationality,
                                     birthCountry: typedStudentData.birthCountry,
-                                    
-                                    // Salud
                                     hasAllergies: typedStudentData.hasAllergies || false,
                                     allergiesDescription: typedStudentData.allergiesDescription || '',
                                     hasDiseases: typedStudentData.hasDiseases || false,
                                     diseasesDescription: typedStudentData.diseasesDescription || '',
-                                    
-                                    // Emergencia
                                     emergencyContact: typedStudentData.emergencyContact,
                                     emergencyPhone: typedStudentData.emergencyPhone,
-                                    
-                                    // Académico (con valores por defecto)
                                     status: typedStudentData.status || 'pendiente',
                                     admissionDate: typedStudentData.admissionDate ? 
                                         new Date(typedStudentData.admissionDate) : new Date(),
@@ -470,35 +470,19 @@ export class User {
                                         new Date().getFullYear().toString(),
                                     currentGrade: typedStudentData.currentGrade || 'En asignar',
                                     section: typedStudentData.section || 'Pendiente',
-                                    
-                                    // Relaciones
                                     representativeId: representative.id!,
                                     userId: ResultadoDB.id!,
+                                    balance: 0 // nuevo estudiante inicia con balance 0
                                 };
 
                                 const newStudent = await Student.create(studentCreateData, { transaction });
-                                
                                 updatedStudentIds.push(newStudent.id!);
                             }
                         }
                     }
                     
                     // Opcional: Eliminar estudiantes que no están en el request
-                    // Para activar esta funcionalidad, descomenta el siguiente bloque:
-                    /*
-                    const studentsToDelete = currentStudentIds.filter(id => !updatedStudentIds.includes(id));
-                    if (studentsToDelete.length > 0) {
-                        // Verificar que los estudiantes a eliminar no tengan registros asociados (horarios, pagos, etc.)
-                        // Esta validación depende de tu modelo de datos
-                        await Student.destroy({
-                            where: { 
-                                id: studentsToDelete,
-                                representativeId: representative.id 
-                            },
-                            transaction
-                        });
-                    }
-                    */
+                    // (comentado como antes)
                 }
             }
             
@@ -772,7 +756,6 @@ export class User {
             const totalUsers = await UserLogin.count();
             const activeUsers = await UserLogin.count({ where: { userstatus: true } });
             const totalStudents = await Student.count();
-            // CORRECCIÓN: El campo 'status' es string, no booleano
             const activeStudents = await Student.count({ where: { status: 'regular' } });
             const totalTeachers = await Teacher.count();
             const totalRepresentatives = await Representative.count();
@@ -875,7 +858,7 @@ export class User {
             // Obtener usuario del representante
             const user = await UserLogin.findByPk(representative.userId, { transaction });
             
-            // Crear estudiante
+            // Crear estudiante con balance 0
             const newStudent = await Student.create({
                 ...studentData,
                 birthDate: new Date(studentData.birthDate),
@@ -884,8 +867,9 @@ export class User {
                 status: 'pendiente',
                 admissionDate: new Date(),
                 initialSchoolYear: new Date().getFullYear().toString(),
-                currentGrade: 'En asignar',
-                section: 'Pendiente'
+                currentGrade: studentData.currentGrade || 'En asignar',
+                section: studentData.section || 'Pendiente',
+                balance: 0
             }, { transaction });
             
             await transaction.commit();
@@ -948,8 +932,16 @@ export class User {
             
             // Aquí puedes agregar validaciones adicionales:
             // - Verificar si el estudiante tiene horarios asignados
-            // - Verificar si tiene pagos pendientes
-            // - Verificar si tiene registros académicos
+            // - Verificar si tiene pagos pendientes (balance distinto de cero)
+            if (student.balance !== 0) {
+                await transaction.rollback();
+                res.status(400).json({ 
+                    result: false, 
+                    content: [], 
+                    error: [`No se puede eliminar el estudiante ${student.fullName} porque tiene un balance de ${student.balance}`] 
+                });
+                return;
+            }
             
             await student.destroy({ transaction });
             await transaction.commit();
@@ -993,7 +985,7 @@ export class User {
                 limit: Number(limit),
                 offset,
                 order: [['fullName', 'ASC']],
-                attributes: ['id', 'fullName', 'identityCard', 'birthDate', 'status', 'currentGrade', 'section', 'createdAt'],
+                attributes: ['id', 'fullName', 'identityCard', 'birthDate', 'status', 'currentGrade', 'section', 'createdAt', 'balance'],
                 include: [{
                     model: Representative,
                     as: 'representative',

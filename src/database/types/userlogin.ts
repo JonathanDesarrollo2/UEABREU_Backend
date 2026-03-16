@@ -1,6 +1,7 @@
 // src/database/types/userlogin.ts
 import { JwtPayload } from "jsonwebtoken";
 
+
 export interface typeuserlogin_full {
     id?: string;
     usermail?: string;
@@ -24,7 +25,7 @@ export interface typeuserlogin_full {
         parentIdentityCard?: string;
         parentAddress?: string;
         parentPhone?: string;
-        initialBalance?: number; // Puede ser positivo o negativo
+        initialBalance?: number;
     };
     
     studentsData?: Array<{
@@ -43,6 +44,9 @@ export interface typeuserlogin_full {
         diseasesDescription?: string;
         emergencyContact: string;
         emergencyPhone: string;
+        // ✅ AGREGAR ESTOS DOS CAMPOS
+        currentGrade?: string;
+        section?: string;
     }>;
 }
 

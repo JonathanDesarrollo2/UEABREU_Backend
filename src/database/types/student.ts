@@ -1,9 +1,9 @@
+// src/database/types/student.ts
 import { typeuserlogin_response } from "./userlogin";
 import { typerepresentative_full } from "./representative";
 
 export type StudentStatus = 'regular' | 'repitiente' | 'condicionado';
 
-// src/database/types/student.ts
 export interface typestudent_full {
     id?: string;
     fullName?: string;
@@ -30,6 +30,8 @@ export interface typestudent_full {
     userId?: string;
     createdAt?: Date;
     updatedAt?: Date;
+    // 💰 NUEVO CAMPO
+    balance?: number;
 }
 
 export interface typestudent_create {
@@ -44,6 +46,7 @@ export interface typestudent_create {
     status?: StudentStatus;
     representativeId: string;
     userId?: string;
+    balance?: number; // opcional al crear
 }
 
 export interface typestudent_update {
@@ -59,6 +62,7 @@ export interface typestudent_update {
     status?: StudentStatus;
     representativeId?: string;
     userId?: string;
+    balance?: number; // opcional al actualizar
 }
 
 export interface typestudent_response {
@@ -78,6 +82,7 @@ export interface typestudent_response {
     updatedAt: Date;
     representative?: typerepresentative_full;
     user?: typeuserlogin_response;
+    balance?: number; // incluir en respuesta
 }
 
 export interface typestudent_list {
