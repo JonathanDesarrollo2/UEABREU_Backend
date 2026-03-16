@@ -25,7 +25,7 @@ export interface typeuserlogin_full {
         parentIdentityCard?: string;
         parentAddress?: string;
         parentPhone?: string;
-        initialBalance?: number;
+        initialBalance?: number; // Puede ser positivo o negativo
     };
     
     studentsData?: Array<{
@@ -44,9 +44,9 @@ export interface typeuserlogin_full {
         diseasesDescription?: string;
         emergencyContact: string;
         emergencyPhone: string;
-        // ✅ AGREGAR ESTOS DOS CAMPOS
         currentGrade?: string;
         section?: string;
+        balance?: number; // 💰 NUEVO CAMPO: balance individual del estudiante
     }>;
 }
 

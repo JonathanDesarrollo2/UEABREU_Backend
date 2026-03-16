@@ -106,7 +106,7 @@ export class User {
 
                             // CREAR ESTUDIANTES con balance individual
                             if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
-                                // Distribuir el initialBalance entre los estudiantes (si existe)
+                                // Distribuir el initialBalance entre los estudiantes (solo como fallback)
                                 const initialBalance = representativeData.initialBalance || 0;
                                 const perStudentBalance = studentsData.length > 0 ? initialBalance / studentsData.length : 0;
 
@@ -123,6 +123,9 @@ export class User {
                                     
                                     if (!existingStudent) {
                                         try {
+                                            // ✅ USAR EL BALANCE INDIVIDUAL SI VIENE DEL FRONTEND, SINO USAR EL DISTRIBUIDO
+                                            const studentBalance = studentData.balance !== undefined ? studentData.balance : perStudentBalance;
+                                            
                                             await Student.create({
                                                 fullName: studentData.fullName,
                                                 identityCard: studentData.identityCard,
@@ -146,7 +149,7 @@ export class User {
                                                 initialSchoolYear: new Date().getFullYear().toString(),
                                                 currentGrade: studentData.currentGrade || 'En asignar',
                                                 section: studentData.section || 'Pendiente',
-                                                balance: perStudentBalance // Asignar parte del initialBalance
+                                                balance: studentBalance // 💰 Asignar el balance correspondiente
                                             }, { transaction });
                                         } catch (studentError: any) {
                                             // Continuamos con el siguiente estudiante
@@ -502,154 +505,152 @@ export class User {
     //#endregion
     
     //#region: Lista de Usuarios Paginados get('/listpag')
-    //#region: Lista de Usuarios Paginados get('/listpag')
-static async getPaginatedlogin(req: Request, res: Response) {
-    try {
-        type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
-        type OrderDirection = 'ASC' | 'DESC';
-        
-        type FieldConfig = {
-            [key: number]: {
-                field: FieldKeys | 'createdAt';
-                orderDirection: OrderDirection;
-            };
-        };
-
-        const page = parseInt(req.query.page as string, 10) || 1;
-        const limit = parseInt(req.query.limit as string, 10) || 5;
-        const idBus = parseInt(req.query.idBus as string, 10) || 1;
-        const DeBus = (req.query.DeBus as string || '').trim();
-        const nivelFilter = req.query.nivelFilter as string || 'all';
-        const offset = (page - 1) * limit;
-
-        const fieldConfig: FieldConfig = {
-            1: { field: 'usermail', orderDirection: 'ASC' },
-            2: { field: 'userlogin', orderDirection: 'ASC' },
-            3: { field: 'username', orderDirection: 'ASC' },
-            4: { field: 'createdAt', orderDirection: 'DESC' }
-        };
-
-        const config = fieldConfig[idBus] || { 
-            field: 'createdAt' as const, 
-            orderDirection: 'DESC' as OrderDirection 
-        };
-
-        // Construir opciones de consulta PRINCIPAL
-        const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
-            limit,
-            offset,
-            attributes: { exclude: ['userpass'] },
-            include: [
-                {
-                    model: Representative,
-                    as: 'representative',
-                    required: false,
-                    include: [
-                        {
-                            model: Student,
-                            as: 'students',
-                            required: false,
-                            attributes: [
-                                'id', 'fullName', 'identityCard', 'birthDate', 'status', 
-                                'emergencyContact', 'emergencyPhone', 'currentGrade', 'section',
-                                'balance' // ✅ AGREGADO: campo balance
-                            ]
-                        }
-                    ]
-                }
-            ]
-        };
-
-        queryOptions.order = [[config.field, config.orderDirection]];
-        
-        // Construir condiciones de búsqueda
-        const whereConditions: any = {};
-        
-        // Filtrar por nivel si no es 'all'
-        if (nivelFilter !== 'all') {
-            whereConditions.nivel = nivelFilter;
-        }
-        
-        // Agregar búsqueda por texto
-        if (DeBus) {
-            whereConditions[Op.or] = [
-                { usermail: { [Op.iLike]: `%${DeBus}%` } },
-                { userlogin: { [Op.iLike]: `%${DeBus}%` } },
-                { username: { [Op.iLike]: `%${DeBus}%` } }
-            ];
+    static async getPaginatedlogin(req: Request, res: Response) {
+        try {
+            type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
+            type OrderDirection = 'ASC' | 'DESC';
             
-            // Para representantes, también buscar en representante y cédula
-            if (nivelFilter === '1' || nivelFilter === 'all') {
-                const repCondition = {
-                    model: Representative,
-                    as: 'representative',
-                    required: false,
-                    where: {
-                        [Op.or]: [
-                            { fullName: { [Op.iLike]: `%${DeBus}%` } },
-                            { identityCard: { [Op.iLike]: `%${DeBus}%` } }
+            type FieldConfig = {
+                [key: number]: {
+                    field: FieldKeys | 'createdAt';
+                    orderDirection: OrderDirection;
+                };
+            };
+
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = parseInt(req.query.limit as string, 10) || 5;
+            const idBus = parseInt(req.query.idBus as string, 10) || 1;
+            const DeBus = (req.query.DeBus as string || '').trim();
+            const nivelFilter = req.query.nivelFilter as string || 'all';
+            const offset = (page - 1) * limit;
+
+            const fieldConfig: FieldConfig = {
+                1: { field: 'usermail', orderDirection: 'ASC' },
+                2: { field: 'userlogin', orderDirection: 'ASC' },
+                3: { field: 'username', orderDirection: 'ASC' },
+                4: { field: 'createdAt', orderDirection: 'DESC' }
+            };
+
+            const config = fieldConfig[idBus] || { 
+                field: 'createdAt' as const, 
+                orderDirection: 'DESC' as OrderDirection 
+            };
+
+            // Construir opciones de consulta PRINCIPAL
+            const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
+                limit,
+                offset,
+                attributes: { exclude: ['userpass'] },
+                include: [
+                    {
+                        model: Representative,
+                        as: 'representative',
+                        required: false,
+                        include: [
+                            {
+                                model: Student,
+                                as: 'students',
+                                required: false,
+                                attributes: [
+                                    'id', 'fullName', 'identityCard', 'birthDate', 'status', 
+                                    'emergencyContact', 'emergencyPhone', 'currentGrade', 'section',
+                                    'balance' // ✅ Campo balance incluido
+                                ]
+                            }
                         ]
                     }
-                };
+                ]
+            };
+
+            queryOptions.order = [[config.field, config.orderDirection]];
+            
+            // Construir condiciones de búsqueda
+            const whereConditions: any = {};
+            
+            // Filtrar por nivel si no es 'all'
+            if (nivelFilter !== 'all') {
+                whereConditions.nivel = nivelFilter;
+            }
+            
+            // Agregar búsqueda por texto
+            if (DeBus) {
+                whereConditions[Op.or] = [
+                    { usermail: { [Op.iLike]: `%${DeBus}%` } },
+                    { userlogin: { [Op.iLike]: `%${DeBus}%` } },
+                    { username: { [Op.iLike]: `%${DeBus}%` } }
+                ];
                 
-                if (!queryOptions.include) queryOptions.include = [];
-                const existingInclude = queryOptions.include as any[];
-                
-                const repIndex = existingInclude.findIndex((inc: any) => inc.as === 'representative');
-                if (repIndex !== -1) {
-                    existingInclude[repIndex] = repCondition;
+                // Para representantes, también buscar en representante y cédula
+                if (nivelFilter === '1' || nivelFilter === 'all') {
+                    const repCondition = {
+                        model: Representative,
+                        as: 'representative',
+                        required: false,
+                        where: {
+                            [Op.or]: [
+                                { fullName: { [Op.iLike]: `%${DeBus}%` } },
+                                { identityCard: { [Op.iLike]: `%${DeBus}%` } }
+                            ]
+                        }
+                    };
+                    
+                    if (!queryOptions.include) queryOptions.include = [];
+                    const existingInclude = queryOptions.include as any[];
+                    
+                    const repIndex = existingInclude.findIndex((inc: any) => inc.as === 'representative');
+                    if (repIndex !== -1) {
+                        existingInclude[repIndex] = repCondition;
+                    }
                 }
             }
-        }
-        
-        if (Object.keys(whereConditions).length > 0) {
-            queryOptions.where = whereConditions;
-        }
-
-        // Ejecutar la consulta principal
-        const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
-
-        // ✅ Transformar la respuesta para incluir el balance total del representante
-        const transformedRows = rows.map(user => {
-            const userJson = user.toJSON() as any;
-            if (userJson.representative && userJson.representative.students) {
-                const totalBalance = userJson.representative.students.reduce(
-                    (sum: number, student: any) => sum + (student.balance || 0), 
-                    0
-                );
-                // Agregar balance calculado al objeto representative
-                userJson.representative.balance = totalBalance;
-                userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
-                    style: 'currency',
-                    currency: 'USD',
-                    minimumFractionDigits: 2
-                }).format(totalBalance);
-                userJson.representative.balanceStatus = totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
+            
+            if (Object.keys(whereConditions).length > 0) {
+                queryOptions.where = whereConditions;
             }
-            return userJson;
-        });
 
-        res.status(200).json({
-            result: true,
-            content: transformedRows,
-            pagination: {
-                totalRecords: count,
-                currentPage: page,
-                totalPages: Math.ceil(count / limit),
-            },
-            error: []
-        });
+            // Ejecutar la consulta principal
+            const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
 
-    } catch (error: any) {
-        ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
-        res.status(500).json({ 
-            result: false, 
-            content: [], 
-            error: ['Error al obtener usuarios'] 
-        });
+            // ✅ Transformar la respuesta para incluir el balance total del representante
+            const transformedRows = rows.map(user => {
+                const userJson = user.toJSON() as any;
+                if (userJson.representative && userJson.representative.students) {
+                    const totalBalance = userJson.representative.students.reduce(
+                        (sum: number, student: any) => sum + (student.balance || 0), 
+                        0
+                    );
+                    // Agregar balance calculado al objeto representative
+                    userJson.representative.balance = totalBalance;
+                    userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
+                        style: 'currency',
+                        currency: 'USD',
+                        minimumFractionDigits: 2
+                    }).format(totalBalance);
+                    userJson.representative.balanceStatus = totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
+                }
+                return userJson;
+            });
+
+            res.status(200).json({
+                result: true,
+                content: transformedRows,
+                pagination: {
+                    totalRecords: count,
+                    currentPage: page,
+                    totalPages: Math.ceil(count / limit),
+                },
+                error: []
+            });
+
+        } catch (error: any) {
+            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
+            res.status(500).json({ 
+                result: false, 
+                content: [], 
+                error: ['Error al obtener usuarios'] 
+            });
+        }
     }
-}
-//#endregion
     //#endregion
 
     //#region: Iniciar Sesion post('/privateauth')
