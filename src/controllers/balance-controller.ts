@@ -8,6 +8,7 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
 import { Op, fn, col, literal } from "sequelize";
+import { PaymentMethod, TransactionType, TransactionStatus } from "../database/models/transaction";
 
 export class BalanceController {
   
@@ -343,9 +344,68 @@ export class BalanceController {
     }
   };
 
-  // Historial de transacciones (sin cambios)
+  // Historial de transacciones
   static getTransactionHistory = async (req: Request, res: Response) => {
-    // ... (código existente, sin cambios) ...
+    try {
+      const { id } = req.params;
+      const {
+        page = 1,
+        limit = 20,
+        type,
+        status,
+        startDate,
+        endDate
+      } = req.query;
+
+      const offset = (Number(page) - 1) * Number(limit);
+      
+      const where: any = { representativeId: id };
+      
+      if (type) where.type = type;
+      if (status) where.status = status;
+      
+      if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
+        if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
+      }
+
+      const { count, rows: transactions } = await Transaction.findAndCountAll({
+        where,
+        limit: Number(limit),
+        offset,
+        order: [['createdAt', 'DESC']],
+        include: [
+          {
+            model: Representative,
+            as: 'representative',
+            attributes: ['fullName', 'identityCard']
+          }
+        ]
+      });
+
+      res.status(200).json({
+        result: true,
+        content: {
+          transactions,
+          pagination: {
+            totalRecords: count,
+            currentPage: Number(page),
+            totalPages: Math.ceil(count / Number(limit)),
+            pageSize: Number(limit)
+          }
+        },
+        error: []
+      });
+
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionHistory"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al obtener historial']
+      });
+    }
   };
 
   // Estadísticas financieras (ahora basadas en balances de estudiantes)
@@ -449,9 +509,37 @@ export class BalanceController {
     }
   };
 
-  // Transacciones recientes (sin cambios)
+  // Transacciones recientes (para dashboard)
   static getRecentTransactions = async (req: Request, res: Response) => {
-    // ... (código existente, sin cambios) ...
+    try {
+      const limit = Number(req.query.limit) || 10;
+      
+      const transactions = await Transaction.findAll({
+        limit,
+        order: [['createdAt', 'DESC']],
+        include: [
+          {
+            model: Representative,
+            as: 'representative',
+            attributes: ['fullName', 'identityCard']
+          }
+        ]
+      });
+
+      res.status(200).json({
+        result: true,
+        content: transactions,
+        error: []
+      });
+
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al obtener transacciones recientes']
+      });
+    }
   };
 
   // Depósito manual - Ahora distribuye entre estudiantes
@@ -634,5 +722,104 @@ export class BalanceController {
     }
   };
 
-  // Otros métodos (checkPaymentExists, getTransactionStatus) permanecen igual
+  // ========== MÉTODOS FALTANTES AGREGADOS ==========
+
+  // Verificar si existe un pago (por referencia y representante)
+  static checkPaymentExists = async (req: Request, res: Response) => {
+    try {
+      const { reference, representativeId } = req.query;
+      
+      if (!reference || !representativeId) {
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: ['La referencia y el ID del representante son requeridos']
+        });
+      }
+      
+      const existingTransaction = await Transaction.findOne({
+        where: {
+          reference: reference as string,
+          representativeId: representativeId as string,
+          status: 'completed'
+        }
+      });
+      
+      res.status(200).json({
+        result: true,
+        content: {
+          exists: !!existingTransaction,
+          transaction: existingTransaction || null
+        },
+        error: []
+      });
+      
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("checkPaymentExists"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al verificar pago']
+      });
+    }
+  };
+
+  // Obtener estado de transacción (por referencia, código de banco, etc.)
+  static getTransactionStatus = async (req: Request, res: Response) => {
+    try {
+      const { reference, bankCode, accountNumber, amount } = req.query;
+      
+      if (!reference || !bankCode) {
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: ['La referencia y el código de banco son requeridos']
+        });
+      }
+      
+      // Buscar la transacción por referencia (puede haber múltiples, pero típicamente es única)
+      const transaction = await Transaction.findOne({
+        where: {
+          reference: reference as string
+        },
+        include: [{
+          model: Representative,
+          as: 'representative',
+          attributes: ['fullName', 'identityCard']
+        }]
+      });
+      
+      if (!transaction) {
+        return res.status(404).json({
+          result: false,
+          content: [],
+          error: ['Transacción no encontrada']
+        });
+      }
+      
+      res.status(200).json({
+        result: true,
+        content: {
+          id: transaction.id,
+          type: transaction.type,
+          amount: transaction.amount,
+          status: transaction.status,
+          reference: transaction.reference,
+          description: transaction.description,
+          createdAt: transaction.createdAt,
+          updatedAt: transaction.updatedAt,
+          representative: transaction.representative
+        },
+        error: []
+      });
+      
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionStatus"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al obtener estado de transacción']
+      });
+    }
+  };
 }
