@@ -1,7 +1,6 @@
 // src/database/types/userlogin.ts
 import { JwtPayload } from "jsonwebtoken";
 
-
 export interface typeuserlogin_full {
     id?: string;
     usermail?: string;
@@ -46,7 +45,8 @@ export interface typeuserlogin_full {
         emergencyPhone: string;
         currentGrade?: string;
         section?: string;
-        balance?: number; // 💰 NUEVO CAMPO: balance individual del estudiante
+        balance?: number; 
+        status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo'; 
     }>;
 }
 

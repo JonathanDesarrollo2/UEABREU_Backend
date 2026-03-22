@@ -22,173 +22,175 @@ const getTotalBalance = async (representativeId: string): Promise<number> => {
 
 export class User {
     //#region: Crear usuarios Nuevos post('/adduser')
-    static adduser = async (req: Request, res: Response) => {
-        const transaction = await sequelize.transaction();
-        
-        try {
-            const { 
-                userpass, 
-                userrepass, 
-                representativeData, 
-                studentsData, 
-                ...userFields 
-            }: typeuserlogin_full = req.body;
+    //#region: Crear usuarios Nuevos post('/adduser')
+static adduser = async (req: Request, res: Response) => {
+    const transaction = await sequelize.transaction();
+    
+    try {
+        const { 
+            userpass, 
+            userrepass, 
+            representativeData, 
+            studentsData, 
+            ...userFields 
+        }: typeuserlogin_full = req.body;
 
-            // Verificar si el email ya existe
-            if (userFields.usermail) {
-                const existingEmail = await UserLogin.findOne({ 
-                    where: { usermail: userFields.usermail } 
+        // Verificar si el email ya existe
+        if (userFields.usermail) {
+            const existingEmail = await UserLogin.findOne({ 
+                where: { usermail: userFields.usermail } 
+            });
+            
+            if (existingEmail) {
+                await transaction.rollback();
+                res.status(202).json({ 
+                    result: false, 
+                    content: [], 
+                    error: [`El email ${userFields.usermail} ya fue asignado a otro usuario`] 
+                }); 
+                return;
+            }
+        }
+
+        // Verificar si el login ya existe
+        if (userFields.userlogin) {
+            const existingLogin = await UserLogin.findOne({ 
+                where: { userlogin: userFields.userlogin } 
+            });
+            
+            if (existingLogin) {
+                await transaction.rollback();
+                res.status(202).json({ 
+                    result: false, 
+                    content: [], 
+                    error: [`El login ${userFields.userlogin} ya está en uso`] 
+                }); 
+                return;
+            }
+        }
+
+        // Crear el usuario
+        const newUser = await UserLogin.create({
+            ...userFields,
+            userpass: userpass,
+            nivel: userFields.nivel || 1,
+            userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true
+        }, { transaction });
+
+        // Si es representante (nivel 1) Y hay datos de representante
+        if (newUser.nivel === 1 && representativeData) {
+            
+            if (!representativeData || !representativeData.identityCard) {
+                // No hacemos rollback porque el usuario ya se creó
+            } else {
+                // Verificar si la cédula del representante ya existe
+                const existingRep = await Representative.findOne({ 
+                    where: { identityCard: representativeData.identityCard },
+                    transaction
                 });
                 
-                if (existingEmail) {
-                    await transaction.rollback();
-                    res.status(202).json({ 
-                        result: false, 
-                        content: [], 
-                        error: [`El email ${userFields.usermail} ya fue asignado a otro usuario`] 
-                    }); 
-                    return;
-                }
-            }
+                if (!existingRep) {
+                    // Crear el representante SIN BALANCE
+                    try {
+                        const newRepresentative = await Representative.create({
+                            fullName: representativeData.fullName,
+                            identityCard: representativeData.identityCard,
+                            address: representativeData.address,
+                            phone: representativeData.phone,
+                            relationship: representativeData.relationship,
+                            parentName: representativeData.parentName,
+                            parentIdentityCard: representativeData.parentIdentityCard,
+                            parentAddress: representativeData.parentAddress,
+                            parentPhone: representativeData.parentPhone,
+                            userId: newUser.id
+                        }, { transaction });
 
-            // Verificar si el login ya existe
-            if (userFields.userlogin) {
-                const existingLogin = await UserLogin.findOne({ 
-                    where: { userlogin: userFields.userlogin } 
-                });
-                
-                if (existingLogin) {
-                    await transaction.rollback();
-                    res.status(202).json({ 
-                        result: false, 
-                        content: [], 
-                        error: [`El login ${userFields.userlogin} ya está en uso`] 
-                    }); 
-                    return;
-                }
-            }
+                        // CREAR ESTUDIANTES con balance individual
+                        if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
+                            // Distribuir el initialBalance entre los estudiantes (solo como fallback)
+                            const initialBalance = representativeData.initialBalance || 0;
+                            const perStudentBalance = studentsData.length > 0 ? initialBalance / studentsData.length : 0;
 
-            // Crear el usuario
-            const newUser = await UserLogin.create({
-                ...userFields,
-                userpass: userpass,
-                nivel: userFields.nivel || 1,
-                userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true
-            }, { transaction });
+                            for (const studentData of studentsData) {
+                                if (!studentData.identityCard || !studentData.fullName) {
+                                    continue;
+                                }
 
-            // Si es representante (nivel 1) Y hay datos de representante
-            if (newUser.nivel === 1 && representativeData) {
-                
-                if (!representativeData || !representativeData.identityCard) {
-                    // No hacemos rollback porque el usuario ya se creó
-                } else {
-                    // Verificar si la cédula del representante ya existe
-                    const existingRep = await Representative.findOne({ 
-                        where: { identityCard: representativeData.identityCard },
-                        transaction
-                    });
-                    
-                    if (!existingRep) {
-                        // Crear el representante SIN BALANCE
-                        try {
-                            const newRepresentative = await Representative.create({
-                                fullName: representativeData.fullName,
-                                identityCard: representativeData.identityCard,
-                                address: representativeData.address,
-                                phone: representativeData.phone,
-                                relationship: representativeData.relationship,
-                                parentName: representativeData.parentName,
-                                parentIdentityCard: representativeData.parentIdentityCard,
-                                parentAddress: representativeData.parentAddress,
-                                parentPhone: representativeData.parentPhone,
-                                userId: newUser.id
-                            }, { transaction });
-
-                            // CREAR ESTUDIANTES con balance individual
-                            if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
-                                // Distribuir el initialBalance entre los estudiantes (solo como fallback)
-                                const initialBalance = representativeData.initialBalance || 0;
-                                const perStudentBalance = studentsData.length > 0 ? initialBalance / studentsData.length : 0;
-
-                                for (const studentData of studentsData) {
-                                    if (!studentData.identityCard || !studentData.fullName) {
-                                        continue;
-                                    }
-
-                                    // Verificar si la cédula del estudiante ya existe
-                                    const existingStudent = await Student.findOne({
-                                        where: { identityCard: studentData.identityCard },
-                                        transaction
-                                    });
-                                    
-                                    if (!existingStudent) {
-                                        try {
-                                            // ✅ USAR EL BALANCE INDIVIDUAL SI VIENE DEL FRONTEND, SINO USAR EL DISTRIBUIDO
-                                            const studentBalance = studentData.balance !== undefined ? studentData.balance : perStudentBalance;
-                                            
-                                            await Student.create({
-                                                fullName: studentData.fullName,
-                                                identityCard: studentData.identityCard,
-                                                birthDate: new Date(studentData.birthDate),
-                                                state: studentData.state,
-                                                zone: studentData.zone,
-                                                addressDescription: studentData.addressDescription,
-                                                phone: studentData.phone || '',
-                                                nationality: studentData.nationality,
-                                                birthCountry: studentData.birthCountry,
-                                                hasAllergies: studentData.hasAllergies,
-                                                allergiesDescription: studentData.allergiesDescription || '',
-                                                hasDiseases: studentData.hasDiseases,
-                                                diseasesDescription: studentData.diseasesDescription || '',
-                                                emergencyContact: studentData.emergencyContact,
-                                                emergencyPhone: studentData.emergencyPhone,
-                                                representativeId: newRepresentative.id,
-                                                userId: newUser.id,
-                                                status: 'pendiente',
-                                                admissionDate: new Date(),
-                                                initialSchoolYear: new Date().getFullYear().toString(),
-                                                currentGrade: studentData.currentGrade || 'En asignar',
-                                                section: studentData.section || 'Pendiente',
-                                                balance: studentBalance // 💰 Asignar el balance correspondiente
-                                            }, { transaction });
-                                        } catch (studentError: any) {
-                                            // Continuamos con el siguiente estudiante
-                                        }
+                                // Verificar si la cédula del estudiante ya existe
+                                const existingStudent = await Student.findOne({
+                                    where: { identityCard: studentData.identityCard },
+                                    transaction
+                                });
+                                
+                                if (!existingStudent) {
+                                    try {
+                                        const studentBalance = studentData.balance !== undefined ? studentData.balance : perStudentBalance;
+                                        
+                                        await Student.create({
+                                            fullName: studentData.fullName,
+                                            identityCard: studentData.identityCard,
+                                            birthDate: new Date(studentData.birthDate),
+                                            state: studentData.state,
+                                            zone: studentData.zone,
+                                            addressDescription: studentData.addressDescription,
+                                            phone: studentData.phone || '',
+                                            nationality: studentData.nationality,
+                                            birthCountry: studentData.birthCountry,
+                                            hasAllergies: studentData.hasAllergies,
+                                            allergiesDescription: studentData.allergiesDescription || '',
+                                            hasDiseases: studentData.hasDiseases,
+                                            diseasesDescription: studentData.diseasesDescription || '',
+                                            emergencyContact: studentData.emergencyContact,
+                                            emergencyPhone: studentData.emergencyPhone,
+                                            representativeId: newRepresentative.id,
+                                            userId: newUser.id,
+                                            status: studentData.status || 'pendiente', // ✅ TOMA STATUS DEL FRONTEND
+                                            admissionDate: new Date(),
+                                            initialSchoolYear: new Date().getFullYear().toString(),
+                                            currentGrade: studentData.currentGrade || 'En asignar',
+                                            section: studentData.section || 'Pendiente',
+                                            balance: studentBalance
+                                        }, { transaction });
+                                    } catch (studentError: any) {
+                                        // Continuamos con el siguiente estudiante
+                                        console.error('Error creando estudiante:', studentError);
                                     }
                                 }
                             }
-                        } catch (repError: any) {
-                            // No hacemos rollback, continuamos sin representante
                         }
+                    } catch (repError: any) {
+                        // No hacemos rollback, continuamos sin representante
+                        console.error('Error creando representante:', repError);
                     }
                 }
             }
-
-            // Confirmar transacción
-            await transaction.commit();
-            
-            res.status(200).json({ 
-                result: true, 
-                content: [`Usuario Creado Exitosamente`], 
-                error: [] 
-            }); 
-        } catch (error: any) {
-            // Revertir transacción en caso de error
-            await transaction.rollback();
-            
-            if (error.name === 'SequelizeValidationError') {
-                // Solo registramos, no mostramos al usuario
-            }
-            
-            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("adduser"));
-            res.status(500).json({ 
-                result: false, 
-                content: [], 
-                error: [`Error al crear Usuario: ${error.message}`]
-            });
         }
-    };
-    //#endregion
+
+        // Confirmar transacción
+        await transaction.commit();
+        
+        res.status(200).json({ 
+            result: true, 
+            content: [`Usuario Creado Exitosamente`], 
+            error: [] 
+        }); 
+    } catch (error: any) {
+        // Revertir transacción en caso de error
+        await transaction.rollback();
+        
+        if (error.name === 'SequelizeValidationError') {
+            // Solo registramos, no mostramos al usuario
+        }
+        
+        ErrorLog.createErrorLog(error, 'Server', getErrorLocation("adduser"));
+        res.status(500).json({ 
+            result: false, 
+            content: [], 
+            error: [`Error al crear Usuario: ${error.message}`]
+        });
+    }
+};
+//#endregion
 
     //#region: Verificar Contraseñas con confirmación de contraseña
     static ComparePass = async (req: Request, res: Response, next: NextFunction) => {
@@ -438,6 +440,11 @@ export class User {
                                 
                                 // No permitir actualizar el balance desde aquí; se maneja en transacciones
                                 delete updateData.balance;
+                                
+                                // Asegurar que status se actualice si viene
+                                if (typedStudentData.status) {
+                                    updateData.status = typedStudentData.status;
+                                }
                                 
                                 await existingStudent.update(updateData, { transaction });
                                 updatedStudentIds.push(typedStudentData.id);

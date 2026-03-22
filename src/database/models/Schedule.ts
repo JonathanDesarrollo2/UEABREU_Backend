@@ -1,4 +1,3 @@
-// src/database/models/schedule.ts
 import {
   Table, Column, Model, DataType, Default, PrimaryKey,
   IsUUID, AllowNull, Length, ForeignKey, BelongsTo, HasMany
@@ -61,16 +60,16 @@ export default class Schedule extends Model<typeschedule_full> {
   @Column({ type: DataType.STRING(20) })
   declare building?: string;
 
-  // Relación con materia
+  // Relación con materia (AHORA OPCIONAL PARA PERMITIR RECESOS)
   @ForeignKey(() => Subject)
-  @AllowNull(false)
+  @AllowNull(true)  // <-- CAMBIO: permitir null para recesos
   @Column({ type: DataType.UUID })
   declare subjectId?: string;
 
   @BelongsTo(() => Subject)
   declare subject?: Subject;
 
-  // Relación con docente (opcional, ya que la materia ya tiene docente)
+  // Relación con docente (opcional)
   @ForeignKey(() => Teacher)
   @AllowNull(true)
   @Column({ type: DataType.UUID })
