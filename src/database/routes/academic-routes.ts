@@ -117,7 +117,7 @@ AcademicRouter.post('/schedule/add',
   body('section').notEmpty().withMessage('Sección requerida'),
   body('day').isIn(['lunes', 'martes', 'miercoles', 'jueves', 'viernes']).withMessage('Día inválido'),
   body('startBlock').isInt({ min: 1, max: 9 }).withMessage('Bloque inicial inválido'),
-  body('endBlock').optional().isInt({ min: 2, max: 9 }),
+  body('endBlock').optional().isInt({ min: 1, max: 9 }),
   body('subjectId').optional({ nullable: true }).isUUID().withMessage('ID de materia inválido'),
   validateRoutes,
   ScheduleController.addSchedule
@@ -155,7 +155,7 @@ AcademicRouter.post('/schedule/update',
   body('code').optional().isLength({ min: 7, max: 7 }),
   body('day').optional().isIn(['lunes', 'martes', 'miercoles', 'jueves', 'viernes']),
   body('startBlock').optional().isInt({ min: 1, max: 9 }),
-  body('endBlock').optional().isInt({ min: 2, max: 9 }),
+  body('endBlock').optional().isInt({ min: 1, max: 9 }),
   validateRoutes,
   ScheduleController.updateSchedule
 );

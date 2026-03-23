@@ -56,8 +56,40 @@ export class ScheduleController {
         });
       }
 
+      // Determinar si es receso (subjectId es null)
+      const isRecess = !scheduleData.subjectId;
+
+      // Validar y ajustar bloques
+      let startBlock = scheduleData.startBlock;
+      let endBlock = scheduleData.endBlock;
+
+      if (!startBlock || startBlock < 1 || startBlock > 9) {
+        await transaction.rollback();
+        return res.status(400).json({ 
+          result: false, 
+          content: [], 
+          error: ['El bloque inicial debe estar entre 1 y 9'] 
+        });
+      }
+
+      if (isRecess) {
+        // Receso: ocupa un solo bloque
+        endBlock = startBlock;
+      } else {
+        // Materia normal: ocupa dos bloques consecutivos
+        endBlock = startBlock + 1;
+        if (endBlock > 9) {
+          await transaction.rollback();
+          return res.status(400).json({ 
+            result: false, 
+            content: [], 
+            error: ['El bloque final no puede ser mayor a 9'] 
+          });
+        }
+      }
+
       // Si se proporcionó materia, verificamos que exista
-      if (scheduleData.subjectId) {
+      if (!isRecess && scheduleData.subjectId) {
         const subject = await Subject.findByPk(scheduleData.subjectId, { transaction });
         if (!subject) {
           await transaction.rollback();
@@ -82,46 +114,51 @@ export class ScheduleController {
         }
       }
 
-      // Validar bloques (deben ser consecutivos y entre 1-9)
-      if (!scheduleData.startBlock || scheduleData.startBlock < 1 || scheduleData.startBlock > 9) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: ['El bloque inicial debe estar entre 1 y 9'] 
-        });
-      }
+      // Verificar superposición de horarios
+      let overlappingCondition: any = {
+        grade: scheduleData.grade,
+        section: scheduleData.section,
+        day: scheduleData.day,
+      };
 
-      // Calcular bloque final si no se proporciona (siempre ocupa 2 bloques)
-      if (!scheduleData.endBlock) {
-        scheduleData.endBlock = scheduleData.startBlock + 1;
-      }
-
-      // Validar que el bloque final sea válido
-      if (scheduleData.endBlock > 9) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: ['El bloque final no puede ser mayor a 9'] 
-        });
-      }
-
-      // Verificar que no haya superposición de horarios en el mismo grado, sección y día
-      const overlappingSchedule = await Schedule.findOne({
-        where: {
-          grade: scheduleData.grade,
-          section: scheduleData.section,
-          day: scheduleData.day,
+      if (isRecess) {
+        // Para receso: verificar si hay algún horario que ocupe exactamente este bloque
+        overlappingCondition = {
+          ...overlappingCondition,
           [Op.or]: [
+            // Un horario normal que cubra este bloque
             {
-              startBlock: { [Op.between]: [scheduleData.startBlock, scheduleData.endBlock - 1] }
+              startBlock: { [Op.lte]: startBlock },
+              endBlock: { [Op.gte]: startBlock }
             },
+            // Un receso exactamente en este bloque
             {
-              endBlock: { [Op.between]: [scheduleData.startBlock + 1, scheduleData.endBlock] }
+              startBlock: startBlock,
+              subjectId: null
             }
           ]
-        },
+        };
+      } else {
+        // Para materia normal: verificar si algún horario ocupa startBlock o startBlock+1
+        overlappingCondition = {
+          ...overlappingCondition,
+          [Op.or]: [
+            // Horarios que cubren startBlock
+            {
+              startBlock: { [Op.lte]: startBlock },
+              endBlock: { [Op.gte]: startBlock }
+            },
+            // Horarios que cubren startBlock+1
+            {
+              startBlock: { [Op.lte]: startBlock + 1 },
+              endBlock: { [Op.gte]: startBlock + 1 }
+            }
+          ]
+        };
+      }
+
+      const overlappingSchedule = await Schedule.findOne({
+        where: overlappingCondition,
         transaction
       });
 
@@ -135,7 +172,13 @@ export class ScheduleController {
       }
 
       // Crear horario
-      const newSchedule = await Schedule.create(scheduleData, { transaction });
+      const newSchedule = await Schedule.create({
+        ...scheduleData,
+        startBlock,
+        endBlock,
+        subjectId: isRecess ? null : scheduleData.subjectId,
+        teacherId: scheduleData.teacherId,
+      }, { transaction });
       await transaction.commit();
 
       // Obtener información completa del horario creado
@@ -178,6 +221,119 @@ export class ScheduleController {
       });
     }
   };
+
+  // Obtener horarios por grado y sección (vista previa)
+  static getSchedulesByGradeSection = async (req: Request, res: Response) => {
+    try {
+      const { grade, section } = req.params;
+
+      const schedules = await Schedule.findAll({
+        where: { grade, section },
+        include: [
+          {
+            model: Subject,
+            as: 'subject',
+            include: [{ 
+              model: Teacher, 
+              as: 'teacher',
+              attributes: ['id', 'fullName']
+            }]
+          },
+          {
+            model: Teacher,
+            as: 'teacher',
+            attributes: ['id', 'fullName']
+          }
+        ],
+        order: [
+          ['day', 'ASC'],
+          ['startBlock', 'ASC']
+        ]
+      });
+
+      // Organizar por día según la estructura del frontend
+      const blockTimes = this.getBlockTimes();
+      const schedulesByDay: any = {
+        lunes: [],
+        martes: [],
+        miercoles: [],
+        jueves: [],
+        viernes: []
+      };
+
+      // Inicializar todos los bloques para cada día
+      Object.keys(schedulesByDay).forEach(day => {
+        schedulesByDay[day] = blockTimes.map((block: any) => ({
+          blockId: block.id,
+          time: block.time,
+          period: block.period,
+          isBreak: false,
+          isOccupied: false,
+          subject: null,
+          teacher: null,
+          scheduleId: null,
+          spans: 1
+        }));
+      });
+
+      // Asignar horarios a los bloques correspondientes
+      schedules.forEach(schedule => {
+        if (schedule.day && schedulesByDay[schedule.day]) {
+          const blockIndex = schedulesByDay[schedule.day].findIndex(
+            (block: any) => block.blockId === schedule.startBlock
+          );
+          
+          if (blockIndex !== -1) {
+            // Determinar si es receso
+            const isRecess = !schedule.subjectId;
+            const spans = isRecess ? 1 : 2;
+            
+            // Marcar el bloque principal
+            schedulesByDay[schedule.day][blockIndex] = {
+              ...schedulesByDay[schedule.day][blockIndex],
+              subject: isRecess ? "RECESO" : schedule.subject?.name,
+              subjectCode: schedule.subject?.code,
+              teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
+              classroom: schedule.classroom,
+              scheduleId: schedule.id,
+              spans: spans,
+              isBreak: isRecess
+            };
+            
+            // Si es materia normal (spans=2), marcar el siguiente bloque como ocupado
+            if (!isRecess && blockIndex + 1 < schedulesByDay[schedule.day].length) {
+              schedulesByDay[schedule.day][blockIndex + 1] = {
+                ...schedulesByDay[schedule.day][blockIndex + 1],
+                isOccupied: true,
+                occupiedBy: schedule.id
+              };
+            }
+          }
+        }
+      });
+
+      res.status(200).json({
+        result: true,
+        content: {
+          grade,
+          section,
+          blockTimes,
+          schedulesByDay
+        },
+        error: []
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getSchedulesByGradeSection"));
+      res.status(500).json({ 
+        result: false, 
+        content: [], 
+        error: ['Error al obtener horarios'] 
+      });
+    }
+  };
+
+  // ... resto de métodos (getSchedules, getScheduleById, updateSchedule, deleteSchedule, etc.) permanecen sin cambios
+
 
   // Listar horarios con filtros
   static getSchedules = async (req: Request, res: Response) => {
@@ -778,116 +934,6 @@ export class ScheduleController {
       });
     }
   };
-
-  // Obtener horarios por grado y sección (para la vista de horarios) - MODIFICADO: ya no genera receso fijo
-  static getSchedulesByGradeSection = async (req: Request, res: Response) => {
-    try {
-      const { grade, section } = req.params;
-
-      const schedules = await Schedule.findAll({
-        where: { grade, section },
-        include: [
-          {
-            model: Subject,
-            as: 'subject',
-            include: [{ 
-              model: Teacher, 
-              as: 'teacher',
-              attributes: ['id', 'fullName']
-            }]
-          },
-          {
-            model: Teacher,
-            as: 'teacher',
-            attributes: ['id', 'fullName']
-          }
-        ],
-        order: [
-          ['day', 'ASC'],
-          ['startBlock', 'ASC']
-        ]
-      });
-
-      // Organizar por día según la estructura del frontend
-      const blockTimes = this.getBlockTimes();
-      const schedulesByDay: any = {
-        lunes: [],
-        martes: [],
-        miercoles: [],
-        jueves: [],
-        viernes: []
-      };
-
-      // Inicializar todos los bloques para cada día sin receso fijo
-      Object.keys(schedulesByDay).forEach(day => {
-        schedulesByDay[day] = blockTimes.map((block: any) => ({
-          blockId: block.id,
-          time: block.time,
-          period: block.period,
-          isBreak: false,      // Ya no hay receso fijo
-          isOccupied: false,   // Inicialmente no ocupado
-          subject: null,
-          teacher: null,
-          scheduleId: null,
-          spans: 1
-        }));
-      });
-
-      // Asignar materias a los bloques correspondientes
-      schedules.forEach(schedule => {
-        if (schedule.day && schedulesByDay[schedule.day]) {
-          const blockIndex = schedulesByDay[schedule.day].findIndex(
-            (block: any) => block.blockId === schedule.startBlock
-          );
-          
-          if (blockIndex !== -1) {
-            // Determinar si es receso (no tiene materia)
-            const isRecess = !schedule.subjectId;
-            
-            // Marcar el bloque principal
-            schedulesByDay[schedule.day][blockIndex] = {
-              ...schedulesByDay[schedule.day][blockIndex],
-              subject: isRecess ? "RECESO" : schedule.subject?.name,
-              subjectCode: schedule.subject?.code,
-              teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
-              classroom: schedule.classroom,
-              scheduleId: schedule.id,
-              spans: 2,         // Cada materia/receso ocupa 2 bloques
-              isBreak: isRecess // Si es receso, marcarlo como break
-            };
-            
-            // Marcar el siguiente bloque como ocupado (rowspan)
-            if (blockIndex + 1 < schedulesByDay[schedule.day].length) {
-              schedulesByDay[schedule.day][blockIndex + 1] = {
-                ...schedulesByDay[schedule.day][blockIndex + 1],
-                isOccupied: true,
-                occupiedBy: schedule.id
-              };
-            }
-          }
-        }
-      });
-
-      res.status(200).json({
-        result: true,
-        content: {
-          grade,
-          section,
-          blockTimes,
-          schedulesByDay
-        },
-        error: []
-      });
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getSchedulesByGradeSection"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: ['Error al obtener horarios'] 
-      });
-    }
-  };
-
   // Obtener estudiantes asignados a un horario
   static getStudentsBySchedule = async (req: Request, res: Response) => {
     try {
