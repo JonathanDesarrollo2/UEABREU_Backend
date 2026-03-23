@@ -118,7 +118,7 @@ AcademicRouter.post('/schedule/add',
   body('day').isIn(['lunes', 'martes', 'miercoles', 'jueves', 'viernes']).withMessage('Día inválido'),
   body('startBlock').isInt({ min: 1, max: 9 }).withMessage('Bloque inicial inválido'),
   body('endBlock').optional().isInt({ min: 2, max: 9 }),
-  body('subjectId').notEmpty().isUUID().withMessage('ID de materia inválido'),
+  body('subjectId').optional({ nullable: true }).isUUID().withMessage('ID de materia inválido'),
   validateRoutes,
   ScheduleController.addSchedule
 );
