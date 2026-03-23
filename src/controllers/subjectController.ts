@@ -16,7 +16,7 @@ export class SubjectController {
     try {
       const subjectData = req.body;
 
-      // Validaciones básicas
+      // Validaciones básicas 
       if (!subjectData.name || !subjectData.code) {
         await transaction.rollback();
         return res.status(400).json({ 
