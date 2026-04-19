@@ -806,7 +806,7 @@ export class BalanceController {
     }
   };
 
-  // Obtener estado de transacción (por referencia, código de banco, etc.)
+  // Obtener estado de transacción (por referencia, código de banco, etc.) 
   static getTransactionStatus = async (req: Request, res: Response) => {
     try {
       const { reference, bankCode, accountNumber, amount } = req.query;
