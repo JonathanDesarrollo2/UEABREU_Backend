@@ -2,20 +2,18 @@
 import type { Request, Response } from "express";
 import Representative from "../database/models/representative";
 import Student from "../database/models/student";
-import Transaction from "../database/models/transaction";
+import Transaction, { PaymentMethod, TransactionType, TransactionStatus } from "../database/models/transaction";
 import UserLogin from "../database/models/userlogin";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
-import { Op, fn, col, literal } from "sequelize";
-import { PaymentMethod, TransactionType, TransactionStatus } from "../database/models/transaction";
+import { Op, fn, col } from "sequelize";
 
 export class BalanceController {
-  
-  // Helper para distribuir un monto entre los estudiantes de un representante
- private static async distributeAmountAmongStudents(
-    representativeId: string, 
-    amount: number, 
+
+  private static async distributeAmountAmongStudents(
+    representativeId: string,
+    amount: number,
     transaction: any
   ): Promise<string[]> {
     const students = await Student.findAll({
@@ -53,14 +51,13 @@ export class BalanceController {
       } = req.query;
 
       const offset = (Number(page) - 1) * Number(limit);
-      
+
       const where: any = {};
-      
+
       if (fullName) where.fullName = { [Op.iLike]: `%${fullName}%` };
       if (identityCard) where.identityCard = { [Op.iLike]: `%${identityCard}%` };
       if (relationship) where.relationship = relationship;
-      
-      // Búsqueda general
+
       if (search) {
         where[Op.or] = [
           { fullName: { [Op.iLike]: `%${search}%` } },
@@ -68,13 +65,11 @@ export class BalanceController {
           { phone: { [Op.iLike]: `%${search}%` } }
         ];
       }
-      
-      // Filtrar solo representantes con usuarios activos
+
       if (activeOnly === true || activeOnly === 'true') {
         where['$user.userstatus$'] = true;
       }
 
-      // Consulta principal con subconsulta para obtener el balance total
       const { count, rows: representatives } = await Representative.findAndCountAll({
         where,
         limit: Number(limit),
@@ -97,7 +92,6 @@ export class BalanceController {
         distinct: true
       });
 
-      // Formatear respuesta calculando balance total y aplicando filtros
       const formattedRepresentatives = representatives
         .map((rep: any) => {
           const totalBalance = rep.students?.reduce((sum: number, s: any) => sum + (s.balance || 0), 0) || 0;
@@ -119,7 +113,6 @@ export class BalanceController {
           };
         })
         .filter(rep => {
-          // Aplicar filtros basados en balance después del cálculo
           if (hasDebt === 'true' && rep.balance >= 0) return false;
           if (hasCredit === 'true' && rep.balance <= 0) return false;
           if (hasStudents === 'true' && rep.studentCount === 0) return false;
@@ -154,8 +147,7 @@ export class BalanceController {
   static getTopDebtors = async (req: Request, res: Response) => {
     try {
       const limit = Number(req.query.limit) || 10;
-      
-      // Obtener todos los representantes con estudiantes
+
       const reps = await Representative.findAll({
         include: [
           {
@@ -173,7 +165,6 @@ export class BalanceController {
         ]
       });
 
-      // Calcular balance total y filtrar deudores
       const debtors = reps
         .map(rep => {
           const totalBalance = rep.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
@@ -189,7 +180,7 @@ export class BalanceController {
           };
         })
         .filter(d => d.balance < 0)
-        .sort((a, b) => a.balance - b.balance) // más negativo primero
+        .sort((a, b) => a.balance - b.balance)
         .slice(0, limit);
 
       res.status(200).json({
@@ -215,7 +206,7 @@ export class BalanceController {
   static getTopCreditors = async (req: Request, res: Response) => {
     try {
       const limit = Number(req.query.limit) || 10;
-      
+
       const reps = await Representative.findAll({
         include: [{
           model: Student,
@@ -265,7 +256,7 @@ export class BalanceController {
   static getBalance = async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      
+
       const representative = await Representative.findByPk(id, {
         include: [
           {
@@ -291,7 +282,6 @@ export class BalanceController {
 
       const totalBalance = representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
 
-      // Obtener últimas transacciones (ahora también asociadas al representante)
       const recentTransactions = await Transaction.findAll({
         where: { representativeId: id },
         limit: 10,
@@ -361,12 +351,12 @@ export class BalanceController {
       } = req.query;
 
       const offset = (Number(page) - 1) * Number(limit);
-      
+
       const where: any = { representativeId: id };
-      
+
       if (type) where.type = type;
       if (status) where.status = status;
-      
+
       if (startDate || endDate) {
         where.createdAt = {};
         if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
@@ -383,6 +373,12 @@ export class BalanceController {
             model: Representative,
             as: 'representative',
             attributes: ['fullName', 'identityCard']
+          },
+          {
+            model: Student,
+            as: 'student',
+            required: false,
+            attributes: ['id', 'fullName']
           }
         ]
       });
@@ -414,10 +410,8 @@ export class BalanceController {
   // Estadísticas financieras (ahora basadas en balances de estudiantes)
   static getFinancialStatistics = async (req: Request, res: Response) => {
     try {
-      // Total de representantes
       const totalRepresentatives = await Representative.count();
-      
-      // Obtener todos los representantes con estudiantes
+
       const reps = await Representative.findAll({
         include: [{
           model: Student,
@@ -445,11 +439,10 @@ export class BalanceController {
         }
       });
 
-      // Transacciones del mes actual
       const now = new Date();
       const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      
+
       const monthlyTransactions = await Transaction.findAll({
         where: {
           createdAt: {
@@ -464,15 +457,15 @@ export class BalanceController {
         group: ['type'],
         raw: true
       });
-      
+
       const totalDeposits = monthlyTransactions
         .filter((t: any) => t.type === 'deposit')
         .reduce((sum: number, t: any) => sum + parseFloat(t.totalAmount || 0), 0);
-      
+
       const totalWithdrawals = monthlyTransactions
         .filter((t: any) => t.type === 'withdrawal')
         .reduce((sum: number, t: any) => sum + parseFloat(t.totalAmount || 0), 0);
-      
+
       const result = {
         general: {
           totalRepresentatives,
@@ -516,7 +509,7 @@ export class BalanceController {
   static getRecentTransactions = async (req: Request, res: Response) => {
     try {
       const limit = Number(req.query.limit) || 10;
-      
+
       const transactions = await Transaction.findAll({
         limit,
         order: [['createdAt', 'DESC']],
@@ -545,13 +538,14 @@ export class BalanceController {
     }
   };
 
-   static manualDeposit = async (req: Request, res: Response) => {
+  // Depósito manual (MODIFICADO: acepta studentId)
+  static manualDeposit = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
-    
+
     try {
       const { id } = req.params;
       const { amount, description, paymentMethod, reference, createdBy, studentId } = req.body;
-      
+
       if (!amount || amount <= 0) {
         await transaction.rollback();
         return res.status(400).json({
@@ -560,8 +554,8 @@ export class BalanceController {
           error: ['El monto debe ser mayor a 0']
         });
       }
-      
-      const representative = await Representative.findByPk(id, { 
+
+      const representative = await Representative.findByPk(id, {
         transaction,
         include: [{ model: Student, as: 'students' }]
       });
@@ -611,22 +605,23 @@ export class BalanceController {
         newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
       }
 
+      // Usar valores de enum en lugar de strings
       const newTransaction = await Transaction.create({
         representativeId: id,
         studentId: targetStudentId,
-        type: 'deposit',
+        type: TransactionType.DEPOSIT,
         amount: amount,
         description: description || 'Depósito manual',
-        paymentMethod: paymentMethod || 'cash',
+        paymentMethod: paymentMethod || PaymentMethod.CASH,
         reference: reference || `MANUAL-${Date.now()}`,
-        status: 'completed',
+        status: TransactionStatus.COMPLETED,
         createdBy: validCreatedBy,
         balanceBefore: totalBefore,
         balanceAfter: newTotalBalance
       }, { transaction });
-      
+
       await transaction.commit();
-      
+
       res.status(200).json({
         result: true,
         content: {
@@ -638,7 +633,7 @@ export class BalanceController {
         },
         error: []
       });
-      
+
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
@@ -650,13 +645,14 @@ export class BalanceController {
     }
   };
 
-   static manualWithdrawal = async (req: Request, res: Response) => {
+  // Retiro manual (MODIFICADO: acepta studentId)
+  static manualWithdrawal = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
-    
+
     try {
       const { id } = req.params;
       const { amount, description, paymentMethod, reference, createdBy, studentId } = req.body;
-      
+
       if (!amount || amount <= 0) {
         await transaction.rollback();
         return res.status(400).json({
@@ -665,8 +661,8 @@ export class BalanceController {
           error: ['El monto debe ser mayor a 0']
         });
       }
-      
-      const representative = await Representative.findByPk(id, { 
+
+      const representative = await Representative.findByPk(id, {
         transaction,
         include: [{ model: Student, as: 'students' }]
       });
@@ -680,7 +676,7 @@ export class BalanceController {
       }
 
       const totalBalance = representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
-      
+
       let validCreatedBy = null;
       if (createdBy) {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -735,19 +731,19 @@ export class BalanceController {
       const newTransaction = await Transaction.create({
         representativeId: id,
         studentId: targetStudentId,
-        type: 'withdrawal',
+        type: TransactionType.WITHDRAWAL,
         amount: amount,
         description: description || 'Retiro manual',
-        paymentMethod: paymentMethod || 'cash',
+        paymentMethod: paymentMethod || PaymentMethod.CASH,
         reference: reference || `MANUAL-${Date.now()}`,
-        status: 'completed',
+        status: TransactionStatus.COMPLETED,
         createdBy: validCreatedBy,
         balanceBefore: totalBalance,
         balanceAfter: newTotalBalance
       }, { transaction });
-      
+
       await transaction.commit();
-      
+
       res.status(200).json({
         result: true,
         content: {
@@ -758,7 +754,7 @@ export class BalanceController {
         },
         error: []
       });
-      
+
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualWithdrawal"));
@@ -769,13 +765,12 @@ export class BalanceController {
       });
     }
   };
-  // ========== MÉTODOS FALTANTES AGREGADOS ==========
 
   // Verificar si existe un pago (por referencia y representante)
   static checkPaymentExists = async (req: Request, res: Response) => {
     try {
       const { reference, representativeId } = req.query;
-      
+
       if (!reference || !representativeId) {
         return res.status(400).json({
           result: false,
@@ -783,15 +778,15 @@ export class BalanceController {
           error: ['La referencia y el ID del representante son requeridos']
         });
       }
-      
+
       const existingTransaction = await Transaction.findOne({
         where: {
           reference: reference as string,
           representativeId: representativeId as string,
-          status: 'completed'
+          status: TransactionStatus.COMPLETED
         }
       });
-      
+
       res.status(200).json({
         result: true,
         content: {
@@ -800,7 +795,7 @@ export class BalanceController {
         },
         error: []
       });
-      
+
     } catch (error: any) {
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("checkPaymentExists"));
       res.status(500).json({
@@ -815,7 +810,7 @@ export class BalanceController {
   static getTransactionStatus = async (req: Request, res: Response) => {
     try {
       const { reference, bankCode, accountNumber, amount } = req.query;
-      
+
       if (!reference || !bankCode) {
         return res.status(400).json({
           result: false,
@@ -823,8 +818,7 @@ export class BalanceController {
           error: ['La referencia y el código de banco son requeridos']
         });
       }
-      
-      // Buscar la transacción por referencia (puede haber múltiples, pero típicamente es única)
+
       const transaction = await Transaction.findOne({
         where: {
           reference: reference as string
@@ -835,7 +829,7 @@ export class BalanceController {
           attributes: ['fullName', 'identityCard']
         }]
       });
-      
+
       if (!transaction) {
         return res.status(404).json({
           result: false,
@@ -843,7 +837,7 @@ export class BalanceController {
           error: ['Transacción no encontrada']
         });
       }
-      
+
       res.status(200).json({
         result: true,
         content: {
@@ -859,7 +853,7 @@ export class BalanceController {
         },
         error: []
       });
-      
+
     } catch (error: any) {
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionStatus"));
       res.status(500).json({

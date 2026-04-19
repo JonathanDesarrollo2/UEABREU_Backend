@@ -1,9 +1,10 @@
 // src/database/models/transaction.ts
-import { 
-  Table, Column, Model, DataType, Default, PrimaryKey, 
-  IsUUID, AllowNull, ForeignKey, BelongsTo 
+import {
+  Table, Column, Model, DataType, Default, PrimaryKey,
+  IsUUID, AllowNull, ForeignKey, BelongsTo
 } from "sequelize-typescript";
 import Representative from "./representative";
+import Student from "./student";
 import UserLogin from "./userlogin";
 
 export enum TransactionType {
@@ -51,6 +52,15 @@ export default class Transaction extends Model {
   @BelongsTo(() => Representative)
   declare representative?: Representative;
 
+  // NUEVO: Relación con Student
+  @ForeignKey(() => Student)
+  @AllowNull(true)
+  @Column({ type: DataType.UUID })
+  declare studentId?: string | null;
+
+  @BelongsTo(() => Student)
+  declare student?: Student | null;
+
   @ForeignKey(() => UserLogin)
   @AllowNull(true)
   @Column({ type: DataType.UUID })
@@ -64,7 +74,7 @@ export default class Transaction extends Model {
   declare type?: TransactionType;
 
   @AllowNull(false)
-  @Column({ 
+  @Column({
     type: DataType.DECIMAL(12, 2),
     get() {
       const value = this.getDataValue('amount');
@@ -119,6 +129,27 @@ export default class Transaction extends Model {
   @AllowNull(true)
   @Column({ type: DataType.STRING(50) })
   declare category?: string;
+
+  // Nuevos campos para balance before/after (opcional, si los usas)
+  @AllowNull(true)
+  @Column({
+    type: DataType.DECIMAL(12, 2),
+    get() {
+      const value = this.getDataValue('balanceBefore');
+      return value ? parseFloat(value) : 0.00;
+    }
+  })
+  declare balanceBefore?: number;
+
+  @AllowNull(true)
+  @Column({
+    type: DataType.DECIMAL(12, 2),
+    get() {
+      const value = this.getDataValue('balanceAfter');
+      return value ? parseFloat(value) : 0.00;
+    }
+  })
+  declare balanceAfter?: number;
 
   // Métodos de ayuda
   isSuccessful(): boolean {
