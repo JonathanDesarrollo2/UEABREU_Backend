@@ -13,22 +13,25 @@ import { PaymentMethod, TransactionType, TransactionStatus } from "../database/m
 export class BalanceController {
   
   // Helper para distribuir un monto entre los estudiantes de un representante
-  private static async distributeAmountAmongStudents(
+ private static async distributeAmountAmongStudents(
     representativeId: string, 
     amount: number, 
     transaction: any
-  ): Promise<void> {
+  ): Promise<string[]> {
     const students = await Student.findAll({
       where: { representativeId },
       transaction
     });
-    if (students.length === 0) return;
+    if (students.length === 0) return [];
     const perStudent = amount / students.length;
+    const updatedIds: string[] = [];
     for (const student of students) {
       await student.update({
         balance: (student.balance || 0) + perStudent
       }, { transaction });
+      updatedIds.push(student.id!);
     }
+    return updatedIds;
   }
 
   // Listar representantes con filtros (ahora el balance se calcula)
@@ -542,15 +545,12 @@ export class BalanceController {
     }
   };
 
-  // Depósito manual - Ahora distribuye entre estudiantes
-  static manualDeposit = async (req: Request, res: Response) => {
+   static manualDeposit = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     
     try {
       const { id } = req.params;
-      const { amount, description, paymentMethod, reference, createdBy } = req.body;
-      
-      console.log('📥 Datos recibidos para depósito:', { id, amount, description, paymentMethod, reference, createdBy });
+      const { amount, description, paymentMethod, reference, createdBy, studentId } = req.body;
       
       if (!amount || amount <= 0) {
         await transaction.rollback();
@@ -574,23 +574,46 @@ export class BalanceController {
         });
       }
 
-      // Validar createdBy
       let validCreatedBy = null;
       if (createdBy) {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         if (uuidRegex.test(createdBy)) validCreatedBy = createdBy;
       }
 
-      // Distribuir el monto entre los estudiantes
-      await this.distributeAmountAmongStudents(id, amount, transaction);
+      let targetStudentId: string | null = null;
+      let newTotalBalance: number;
+      let updatedStudentIds: string[] = [];
 
-      // Calcular nuevo balance total para la transacción
-      const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
-      const newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
+      const totalBefore = representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
 
-      // Crear transacción
+      if (studentId) {
+        const student = await Student.findOne({
+          where: { id: studentId, representativeId: id },
+          transaction
+        });
+        if (!student) {
+          await transaction.rollback();
+          return res.status(400).json({
+            result: false,
+            content: [],
+            error: ['Estudiante no encontrado o no pertenece al representante']
+          });
+        }
+        const newBalance = (student.balance || 0) + amount;
+        await student.update({ balance: newBalance }, { transaction });
+        targetStudentId = student.id!;
+        updatedStudentIds.push(student.id!);
+        const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
+        newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
+      } else {
+        updatedStudentIds = await this.distributeAmountAmongStudents(id, amount, transaction);
+        const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
+        newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
+      }
+
       const newTransaction = await Transaction.create({
         representativeId: id,
+        studentId: targetStudentId,
         type: 'deposit',
         amount: amount,
         description: description || 'Depósito manual',
@@ -598,7 +621,7 @@ export class BalanceController {
         reference: reference || `MANUAL-${Date.now()}`,
         status: 'completed',
         createdBy: validCreatedBy,
-        balanceBefore: (representative as any)._previousBalance, // no tenemos el anterior fácilmente, pero se puede omitir
+        balanceBefore: totalBefore,
         balanceAfter: newTotalBalance
       }, { transaction });
       
@@ -610,14 +633,14 @@ export class BalanceController {
           message: 'Depósito registrado exitosamente',
           transactionId: newTransaction.id,
           newBalance: newTotalBalance,
-          distributedAmong: updatedStudents.length
+          distributedAmong: updatedStudentIds.length,
+          appliedToStudent: targetStudentId
         },
         error: []
       });
       
     } catch (error: any) {
       await transaction.rollback();
-      console.error('❌ Error en manualDeposit:', error);
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
       res.status(500).json({
         result: false,
@@ -627,15 +650,12 @@ export class BalanceController {
     }
   };
 
-  // Retiro manual - Ahora distribuye entre estudiantes (resta)
-  static manualWithdrawal = async (req: Request, res: Response) => {
+   static manualWithdrawal = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     
     try {
       const { id } = req.params;
-      const { amount, description, paymentMethod, reference, createdBy } = req.body;
-      
-      console.log('📥 Datos recibidos para retiro:', { id, amount, description, paymentMethod, reference, createdBy });
+      const { amount, description, paymentMethod, reference, createdBy, studentId } = req.body;
       
       if (!amount || amount <= 0) {
         await transaction.rollback();
@@ -659,34 +679,62 @@ export class BalanceController {
         });
       }
 
-      // Verificar saldo total suficiente
       const totalBalance = representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
-      if (totalBalance < amount) {
-        await transaction.rollback();
-        return res.status(400).json({
-          result: false,
-          content: [],
-          error: [`Saldo insuficiente. Saldo actual: ${totalBalance}`]
-        });
-      }
-
-      // Validar createdBy
+      
       let validCreatedBy = null;
       if (createdBy) {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         if (uuidRegex.test(createdBy)) validCreatedBy = createdBy;
       }
 
-      // Distribuir el retiro (restar) entre los estudiantes
-      await this.distributeAmountAmongStudents(id, -amount, transaction);
+      let targetStudentId: string | null = null;
+      let newTotalBalance: number;
+      let updatedStudentIds: string[] = [];
 
-      // Calcular nuevo balance total
-      const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
-      const newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
+      if (studentId) {
+        const student = await Student.findOne({
+          where: { id: studentId, representativeId: id },
+          transaction
+        });
+        if (!student) {
+          await transaction.rollback();
+          return res.status(400).json({
+            result: false,
+            content: [],
+            error: ['Estudiante no encontrado o no pertenece al representante']
+          });
+        }
+        if ((student.balance || 0) < amount) {
+          await transaction.rollback();
+          return res.status(400).json({
+            result: false,
+            content: [],
+            error: [`Saldo insuficiente en el estudiante seleccionado. Saldo actual: ${student.balance}`]
+          });
+        }
+        const newBalance = (student.balance || 0) - amount;
+        await student.update({ balance: newBalance }, { transaction });
+        targetStudentId = student.id!;
+        updatedStudentIds.push(student.id!);
+        const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
+        newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
+      } else {
+        if (totalBalance < amount) {
+          await transaction.rollback();
+          return res.status(400).json({
+            result: false,
+            content: [],
+            error: [`Saldo insuficiente. Saldo actual: ${totalBalance}`]
+          });
+        }
+        updatedStudentIds = await this.distributeAmountAmongStudents(id, -amount, transaction);
+        const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
+        newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
+      }
 
-      // Crear transacción
       const newTransaction = await Transaction.create({
         representativeId: id,
+        studentId: targetStudentId,
         type: 'withdrawal',
         amount: amount,
         description: description || 'Retiro manual',
@@ -705,14 +753,14 @@ export class BalanceController {
         content: {
           message: 'Retiro registrado exitosamente',
           transactionId: newTransaction.id,
-          newBalance: newTotalBalance
+          newBalance: newTotalBalance,
+          appliedToStudent: targetStudentId
         },
         error: []
       });
       
     } catch (error: any) {
       await transaction.rollback();
-      console.error('❌ Error en manualWithdrawal:', error);
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualWithdrawal"));
       res.status(500).json({
         result: false,
@@ -721,7 +769,6 @@ export class BalanceController {
       });
     }
   };
-
   // ========== MÉTODOS FALTANTES AGREGADOS ==========
 
   // Verificar si existe un pago (por referencia y representante)

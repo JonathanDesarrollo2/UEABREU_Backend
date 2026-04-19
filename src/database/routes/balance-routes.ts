@@ -80,6 +80,7 @@ router.post('/representative/:id/deposit',
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
   body('createdBy').optional().isUUID(),
+  body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
   BalanceController.manualDeposit
 );
@@ -95,6 +96,7 @@ router.post('/representative/:id/withdraw',
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
   body('createdBy').optional().isUUID(),
+  body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
   BalanceController.manualWithdrawal
 );
