@@ -1,4 +1,5 @@
 import server from "./server";
+import colors from "colors";
 import dotenv from "dotenv";
 import { connectToDatabase } from "./database/config";
 import { ErrorLog } from "./utility/ErrorLog";
@@ -21,9 +22,16 @@ async function initializeDatabase() {
   while (attempt <= effectiveMaxRetries) {
     try {
       await connectToDatabase();
+      console.log(colors.blue.bold(`✅ Conexión exitosa a la Base de datos (Intento ${attempt})`));
       return true;
     } catch (error: any) {
       const delay = Math.min(RETRY_DELAY * Math.pow(2, attempt - 1), 60000);
+      
+      console.log(colors.yellow.bold(
+        `⚠️  Error conectando la Base de datos, Intento ${attempt}/${effectiveMaxRetries} fallido. ` +
+        `Próximo intento en ${delay/1000} segundos. ` +
+        `Error: ${error.message}`
+      ));
       
       ErrorLog.createErrorLog(
         error, 
@@ -38,6 +46,9 @@ async function initializeDatabase() {
     }
   }
   
+  console.log(colors.red.bold(
+    `❌ Error conectando la Base de datos, Máximo de reintentos alcanzado (${effectiveMaxRetries}). `
+  ));
   return false;
 }
 //#endregion
@@ -46,12 +57,17 @@ async function initializeDatabase() {
 async function startServer() {
   try {
     const dbConnected = await initializeDatabase();
+    
+    if (!dbConnected) {
+      console.log(colors.yellow.bold("⚠️  Servidor iniciado SIN conexión a BD - Modo Público"));
+    }
 
     server.listen(port, () => {
-      // Servidor iniciado correctamente (sin logs)
     });
 
   } catch (error: any) {
+    console.log(colors.red.bold(`💥 Error al iniciar servidor: ${error.message}`));
+    
     ErrorLog.createErrorLog(
       error, 
       'system', 
