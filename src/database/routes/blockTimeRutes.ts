@@ -15,7 +15,7 @@ routerBlockTime.get('/block-times',
 );
 
 routerBlockTime.post('/block-times',
-  authsession,
+  authsession, 
   body('grade').notEmpty().withMessage('Grado requerido'),
   body('section').notEmpty().withMessage('Sección requerida'),
   body('blocks').isArray({ min: 1 }).withMessage('Debe enviar un array de bloques'),
