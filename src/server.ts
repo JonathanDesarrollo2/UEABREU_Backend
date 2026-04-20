@@ -57,7 +57,7 @@ server.use('/api/bank', BankRoutes);
 server.use('/api/private/user', RouterUser);
 server.use('/api/private/academic', AcademicRouter);
 server.use('/api/private/balance', BalanceRoutes);
-server.use('/api/private/block', routerBlockTime )
+server.use('/api/private/block', routerBlockTime );
 
 // Health check actualizado
 server.get('/api/', (req, res) => {
@@ -71,7 +71,7 @@ server.get('/api/', (req, res) => {
             bank: 'Available at /api/bank',
             balance: 'Available at /api/private/balance',
             user: 'Available at /api/private/user',
-            config: 'Available at /api/private/config',
+            config: 'Available at /api/private/block',
             auth: 'Available at /api/public/login'
         },
         endpoints: {
@@ -80,7 +80,7 @@ server.get('/api/', (req, res) => {
             balance_stats: '/api/private/balance/statistics/financial',
             teachers: '/api/private/academic/teacher/list',
             students: '/api/private/user/students/list',
-            block_times: '/api/private/config/block-times'
+            block_times: '/api/private/block/block-times'
         }
     });
 });
@@ -130,7 +130,7 @@ server.use('*', (req, res) => {
             balance: '/api/private/balance/*',
             user: '/api/private/user/*',
             academic: '/api/private/academic/*',
-            config: '/api/private/config/*',
+            config: '/api/private/block/*',
             cors_test: '/api/cors-test'
         }
     });
