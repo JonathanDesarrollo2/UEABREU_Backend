@@ -13,7 +13,6 @@ import BankRoutes from "./bank/routes/bank-routes";
 import RouterUser from "./database/routes/routeslogin";
 import AcademicRouter from "./database/routes/academic-routes";
 import BalanceRoutes from "./database/routes/balance-routes";
-import routerBlockTime from "./database/routes/blockTimeRutes";
 
 dotenv.config();
 //#endregion
@@ -57,7 +56,6 @@ server.use('/api/bank', BankRoutes);
 server.use('/api/private/user', RouterUser);
 server.use('/api/private/academic', AcademicRouter);
 server.use('/api/private/balance', BalanceRoutes);
-server.use('/api/private/config', routerBlockTime); // <-- NUEVA RUTA
 
 // Health check actualizado
 server.get('/api/', (req, res) => {
