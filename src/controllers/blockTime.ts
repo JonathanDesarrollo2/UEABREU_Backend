@@ -25,61 +25,91 @@ export class BlockTimeConfigController {
    * Si no existe, devuelve los valores por defecto.
    */
   static getBlockTimes = async (req: Request, res: Response) => {
-    try {
-      const { grade, section } = req.query;
-      
-      if (!grade || !section) {
-        return res.status(400).json({
-          result: false,
-          content: [],
-          error: ['Grado y sección son requeridos']
-        });
-      }
+  console.log('📥 [getBlockTimes] ========== INICIO ==========');
+  console.log('📥 [getBlockTimes] Query params:', req.query);
+  console.log('📥 [getBlockTimes] Headers Authorization:', req.headers.authorization ? 'Presente' : 'Ausente');
 
-      const configs = await BlockTimeConfig.findAll({
-        where: {
-          grade: grade as string,
-          section: section as string,
-          isActive: true
-        },
-        order: [['blockNumber', 'ASC']]
-      });
-
-      let blocks;
-      if (configs.length > 0) {
-        blocks = configs.map(c => ({
-          blockNumber: c.blockNumber,
-          startTime: c.startTime,
-          endTime: c.endTime,
-          isActive: c.isActive
-        }));
-      } else {
-        // Devolver valores por defecto
-        blocks = DEFAULT_BLOCK_TIMES.map(b => ({
-          ...b,
-          isActive: true
-        }));
-      }
-
-      res.status(200).json({
-        result: true,
-        content: {
-          grade,
-          section,
-          blocks
-        },
-        error: []
-      });
-
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getBlockTimes"));
-      res.status(500).json({
+  try {
+    const { grade, section } = req.query;
+    
+    console.log('📥 [getBlockTimes] Validando parámetros...');
+    if (!grade || !section) {
+      console.warn('⚠️ [getBlockTimes] Faltan parámetros requeridos');
+      return res.status(400).json({
         result: false,
         content: [],
-        error: ['Error al obtener configuración de bloques']
+        error: ['Grado y sección son requeridos']
       });
     }
-  };
+    console.log(`✅ [getBlockTimes] Parámetros válidos: grade=${grade}, section=${section}`);
+
+    console.log('🔍 [getBlockTimes] Ejecutando consulta a la base de datos...');
+    const configs = await BlockTimeConfig.findAll({
+      where: {
+        grade: grade as string,
+        section: section as string,
+        isActive: true
+      },
+      order: [['blockNumber', 'ASC']],
+      logging: (sql) => console.log('🐘 [Sequelize SQL]:', sql)  // Log de la consulta SQL generada
+    });
+
+    console.log(`✅ [getBlockTimes] Consulta exitosa. Registros encontrados: ${configs.length}`);
+
+    let blocks;
+    if (configs.length > 0) {
+      blocks = configs.map(c => ({
+        blockNumber: c.blockNumber,
+        startTime: c.startTime,
+        endTime: c.endTime,
+        isActive: c.isActive
+      }));
+      console.log('📦 [getBlockTimes] Bloques desde BD:', blocks);
+    } else {
+      blocks = DEFAULT_BLOCK_TIMES.map(b => ({
+        ...b,
+        isActive: true
+      }));
+      console.log('📦 [getBlockTimes] No hay registros en BD. Usando valores por defecto:', blocks);
+    }
+
+    const response = {
+      result: true,
+      content: {
+        grade,
+        section,
+        blocks
+      },
+      error: []
+    };
+
+    console.log('✅ [getBlockTimes] Respuesta exitosa preparada');
+    console.log('📤 [getBlockTimes] ========== FIN (200) ==========');
+    res.status(200).json(response);
+
+  } catch (error: any) {
+    console.error('❌ [getBlockTimes] ========== ERROR CAPTURADO ==========');
+    console.error('❌ [getBlockTimes] Mensaje:', error.message);
+    console.error('❌ [getBlockTimes] Stack:', error.stack);
+    console.error('❌ [getBlockTimes] Nombre del error:', error.name);
+    
+    // Si es un error de Sequelize, mostrar más detalles
+    if (error.name && error.name.startsWith('Sequelize')) {
+      console.error('❌ [getBlockTimes] Error de Sequelize detectado');
+      console.error('❌ [getBlockTimes] SQL:', error.sql);
+      console.error('❌ [getBlockTimes] Parámetros SQL:', error.parameters);
+    }
+
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getBlockTimes"));
+    
+    console.error('📤 [getBlockTimes] ========== FIN (500) ==========');
+    res.status(500).json({
+      result: false,
+      content: [],
+      error: ['Error al obtener configuración de bloques']
+    });
+  }
+};
 
   /**
    * Guardar o actualizar la configuración de bloques para un grado y sección.
