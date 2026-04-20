@@ -14,6 +14,7 @@ import Teacher from "./models/teacher";
 import Subject from "./models/subject";
 import Schedule from "./models/Schedule";
 import StudentSchedule from "./models/StudentSchedule";
+import BlockTimeConfig from "./models/blockTimeConfig"; // <-- NUEVO (IMPORTACIÓN)
 // ⭐⭐⭐ FIN DE NUEVOS MODELOS ⭐⭐⭐
 
 dotenv.config();
@@ -50,10 +51,11 @@ if (NODE_ENV === 'production') {
       Student, 
       Representative, 
       Transaction,
-      Teacher,         // ← NUEVO
-      Subject,         // ← NUEVO
-      Schedule,        // ← NUEVO
-      StudentSchedule  // ← NUEVO (¡ESTO ES LO QUE FALTA!)
+      Teacher,
+      Subject,
+      Schedule,
+      StudentSchedule,
+      BlockTimeConfig // <-- NUEVO (MODELO AÑADIDO)
     ],
     // ⭐⭐⭐ FIN DE AGREGAR MODELOS ⭐⭐⭐
     logging: console.log,
@@ -81,10 +83,11 @@ if (NODE_ENV === 'production') {
       Student, 
       Representative, 
       Transaction,
-      Teacher,         // ← NUEVO
-      Subject,         // ← NUEVO
-      Schedule,        // ← NUEVO
-      StudentSchedule  // ← NUEVO
+      Teacher,
+      Subject,
+      Schedule,
+      StudentSchedule,
+      BlockTimeConfig // <-- NUEVO (MODELO AÑADIDO)
     ],
     // ⭐⭐⭐ FIN DE AGREGAR MODELOS ⭐⭐⭐
     logging: console.log,
