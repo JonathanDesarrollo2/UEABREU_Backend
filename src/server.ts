@@ -57,6 +57,7 @@ server.use('/api/bank', BankRoutes);
 server.use('/api/private/user', RouterUser);
 server.use('/api/private/academic', AcademicRouter);
 server.use('/api/private/balance', BalanceRoutes);
+server.use('/api/private/block', routerBlockTime );
 
 // Health check actualizado
 server.get('/api/', (req, res) => {

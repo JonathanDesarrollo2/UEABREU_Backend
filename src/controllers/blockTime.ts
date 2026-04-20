@@ -3,8 +3,7 @@ import type { Request, Response } from "express";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
-import { Op } from "sequelize";
-import BlockTimeConfig from "../database/models/blogTimeConfig";
+import BlockTimeConfig from "../database/models/blockTimeConfig";
 
 // Valores por defecto (los mismos que usas actualmente)
 const DEFAULT_BLOCK_TIMES = [
