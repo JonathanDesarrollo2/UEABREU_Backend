@@ -9,8 +9,8 @@ export interface BlockTimeConfigAttributes {
   grade: string;
   section: string;
   blockNumber: number;
-  startTime: string;   // formato 'HH:mm'
-  endTime: string;     // formato 'HH:mm'
+  startTime: string;
+  endTime: string;
   isActive?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
@@ -20,6 +20,12 @@ export interface BlockTimeConfigAttributes {
   tableName: 'block_time_config',
   freezeTableName: true,
   timestamps: true,
+  indexes: [
+    {
+      unique: true,
+      fields: ['grade', 'section', 'blockNumber']
+    }
+  ]
 })
 export default class BlockTimeConfig extends Model<BlockTimeConfigAttributes> {
   
@@ -54,7 +60,6 @@ export default class BlockTimeConfig extends Model<BlockTimeConfigAttributes> {
   @Column({ type: DataType.BOOLEAN })
   declare isActive?: boolean;
 
-  // Índice único compuesto: grado + sección + número de bloque
-  @Unique('unique_grade_section_block')
-  static uniqueConstraint: any;
+  // La propiedad estática uniqueConstraint ya no es necesaria
+  // static uniqueConstraint: any; <-- ELIMINAR
 }
