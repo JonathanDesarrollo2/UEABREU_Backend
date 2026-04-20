@@ -19,7 +19,7 @@ export interface BlockTimeConfigAttributes {
 @Table({
   tableName: 'block_time_config',
   freezeTableName: true,
-  timestamps: true,
+  timestamps: true, 
   indexes: [
     {
       unique: true,
