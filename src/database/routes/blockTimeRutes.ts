@@ -1,14 +1,12 @@
-// src/routes/blockTimeRoutes.ts
 import { Router } from "express";
 import { body, query } from "express-validator";
 import { validateRoutes } from "../../middleware/validateRoutes";
 import { authsession } from "../../utility/authsession";
 import { BlockTimeConfigController } from "../../controllers/blogTimeConfigController";
 
-const router = Router();
+const routerBlockTime = Router();
 
-// Obtener configuración de bloques para un grado y sección
-router.get('/block-times',
+routerBlockTime.get('/block-times',
   authsession,
   query('grade').notEmpty().withMessage('Grado requerido'),
   query('section').notEmpty().withMessage('Sección requerida'),
@@ -16,8 +14,7 @@ router.get('/block-times',
   BlockTimeConfigController.getBlockTimes
 );
 
-// Guardar configuración de bloques (reemplaza la existente)
-router.post('/block-times',
+routerBlockTime.post('/block-times',
   authsession,
   body('grade').notEmpty().withMessage('Grado requerido'),
   body('section').notEmpty().withMessage('Sección requerida'),
@@ -29,8 +26,7 @@ router.post('/block-times',
   BlockTimeConfigController.saveBlockTimes
 );
 
-// Restablecer a valores por defecto
-router.post('/block-times/reset',
+routerBlockTime.post('/block-times/reset',
   authsession,
   body('grade').notEmpty().withMessage('Grado requerido'),
   body('section').notEmpty().withMessage('Sección requerida'),
@@ -38,10 +34,9 @@ router.post('/block-times/reset',
   BlockTimeConfigController.resetToDefault
 );
 
-// Obtener todas las configuraciones (para panel admin)
-router.get('/block-times/all',
+routerBlockTime.get('/block-times/all',
   authsession,
   BlockTimeConfigController.getAllConfigs
 );
 
-export default router;
+export default routerBlockTime;

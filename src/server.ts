@@ -1,7 +1,6 @@
 // src/routes/index.ts
 //#region: Importar
 import express from "express";  
-import colors from "colors";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
@@ -13,8 +12,8 @@ import { getErrorLocation } from "./utility/callerinfo";
 import BankRoutes from "./bank/routes/bank-routes";
 import RouterUser from "./database/routes/routeslogin";
 import AcademicRouter from "./database/routes/academic-routes";
-import BalanceRoutes from "./database/routes/balance-routes"; // <-- AGREGAR ESTA LÍNEA
-// import NotificationRoutes from "../bank/routes/notification-routes"; // COMENTADO POR AHORA
+import BalanceRoutes from "./database/routes/balance-routes";
+import routerBlockTime from "./database/routes/blockTimeRutes";
 
 dotenv.config();
 //#endregion
@@ -51,13 +50,14 @@ server.use((req, res, next) => {
 // Rutas Públicas (sin autenticación)
 server.use('/api/public/login', RouterUser);
 
-// 👇 RUTAS DEL BANCO (SOLO LAS ESENCIALES)
+// Rutas del Banco
 server.use('/api/bank', BankRoutes);
 
-// En server.ts, en la sección de rutas privadas
+// Rutas Privadas (con autenticación)
 server.use('/api/private/user', RouterUser);
 server.use('/api/private/academic', AcademicRouter);
 server.use('/api/private/balance', BalanceRoutes);
+server.use('/api/private/config', routerBlockTime); // <-- NUEVA RUTA
 
 // Health check actualizado
 server.get('/api/', (req, res) => {
@@ -71,6 +71,7 @@ server.get('/api/', (req, res) => {
             bank: 'Available at /api/bank',
             balance: 'Available at /api/private/balance',
             user: 'Available at /api/private/user',
+            config: 'Available at /api/private/config',
             auth: 'Available at /api/public/login'
         },
         endpoints: {
@@ -78,7 +79,8 @@ server.get('/api/', (req, res) => {
             user_stats: '/api/private/user/statistics',
             balance_stats: '/api/private/balance/statistics/financial',
             teachers: '/api/private/academic/teacher/list',
-            students: '/api/private/user/students/list'
+            students: '/api/private/user/students/list',
+            block_times: '/api/private/config/block-times'
         }
     });
 });
@@ -97,9 +99,6 @@ server.get('/api/cors-test', (req, res) => {
 //#region: Manejo de Errores
 // Manejo de errores no capturados
 server.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error(colors.red.bold(`💥 Error no manejado: ${err.message}`));
-    console.error(err.stack);
-    
     ErrorLog.createErrorLog(
         err, 
         'system',
@@ -128,9 +127,10 @@ server.use('*', (req, res) => {
             root: '/',
             api: '/api/',
             bank: '/api/bank/*',
-            balance: '/api/private/balance/*', // <-- AGREGAR ESTE
+            balance: '/api/private/balance/*',
             user: '/api/private/user/*',
             academic: '/api/private/academic/*',
+            config: '/api/private/config/*',
             cors_test: '/api/cors-test'
         }
     });
