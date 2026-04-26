@@ -30,7 +30,6 @@ const {
 
 let sequelize: Sequelize;
 
-// Configuración de Sequelize con sequelize-typescript
 if (NODE_ENV === 'production') {
   sequelize = new Sequelize({
     database: DB_NAME,
@@ -45,7 +44,6 @@ if (NODE_ENV === 'production') {
         rejectUnauthorized: false
       }
     },
-    // ⭐⭐⭐ AGREGA TODOS LOS NUEVOS MODELOS AQUÍ ⭐⭐⭐
     models: [
       UserLogin, 
       Student, 
@@ -55,9 +53,8 @@ if (NODE_ENV === 'production') {
       Subject,
       Schedule,
       StudentSchedule,
-      BlockTimeConfig // <-- NUEVO (MODELO AÑADIDO)
+      BlockTimeConfig 
     ],
-    // ⭐⭐⭐ FIN DE AGREGAR MODELOS ⭐⭐⭐
     logging: console.log,
     pool: {
       max: 5,
@@ -77,7 +74,6 @@ if (NODE_ENV === 'production') {
     host: DB_HOST || 'localhost',
     port: parseInt(DB_PORT || '5434', 10),
     dialect: 'postgres',
-    // ⭐⭐⭐ AGREGA TODOS LOS NUEVOS MODELOS AQUÍ TAMBIÉN ⭐⭐⭐
     models: [
       UserLogin, 
       Student, 
@@ -87,9 +83,8 @@ if (NODE_ENV === 'production') {
       Subject,
       Schedule,
       StudentSchedule,
-      BlockTimeConfig // <-- NUEVO (MODELO AÑADIDO)
+      BlockTimeConfig 
     ],
-    // ⭐⭐⭐ FIN DE AGREGAR MODELOS ⭐⭐⭐
     logging: console.log,
     pool: {
       max: 5,

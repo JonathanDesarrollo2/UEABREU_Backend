@@ -863,4 +863,55 @@ export class BalanceController {
       });
     }
   };
+static getRepresentativeByEmail = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({
+        result: false,
+        content: [],
+        error: ['Email es requerido']
+      });
+    }
+
+    const user = await UserLogin.findOne({
+      where: { usermail: email as string }
+    });
+    if (!user) {
+      return res.status(404).json({
+        result: false,
+        content: [],
+        error: ['Usuario no encontrado']
+      });
+    }
+
+    const representative = await Representative.findOne({
+      where: { userId: user.id }
+    });
+    if (!representative) {
+      return res.status(404).json({
+        result: false,
+        content: [],
+        error: ['No se encontró representante asociado a este usuario']
+      });
+    }
+
+    res.json({
+      result: true,
+      content: {
+        id: representative.id,
+        fullName: representative.fullName,
+        identityCard: representative.identityCard
+      },
+      error: []
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRepresentativeByEmail"));
+    res.status(500).json({
+      result: false,
+      content: [],
+      error: ['Error al buscar representante']
+    });
+  }
+};
 }

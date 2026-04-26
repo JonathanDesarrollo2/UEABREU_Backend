@@ -138,5 +138,7 @@ router.get('/transactions/recent',
   validateRoutes,
   BalanceController.getRecentTransactions
 );
+router.get('/representative-by-email', 
+  BalanceController.getRepresentativeByEmail);
 
 export default router;
