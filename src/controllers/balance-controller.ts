@@ -31,7 +31,7 @@ export class BalanceController {
     }
     return updatedIds;
   }
-
+ 
   // Listar representantes con filtros (ahora el balance se calcula)
   static listRepresentatives = async (req: Request, res: Response) => {
     try {
