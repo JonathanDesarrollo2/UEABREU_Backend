@@ -10,7 +10,29 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
 import { Op } from "sequelize";
+import BlockTimeConfig from "../database/models/blockTimeConfig";
+// Función auxiliar para obtener nombre del período
+function getPeriodName(blockNumber: number): string {
+  const names: Record<number, string> = {
+    1: 'Primer Horario', 2: 'Segundo Horario', 3: 'Tercer Horario',
+    4: 'Cuarto Horario', 5: 'Receso', 6: 'Sexto Horario',
+    7: 'Séptimo Horario', 8: 'Octavo Horario', 9: 'Noveno Horario'
+  };
+  return names[blockNumber] || `Bloque ${blockNumber}`;
+}
 
+// Valores por defecto (deben coincidir con los de BlockTimeConfigController)
+const DEFAULT_BLOCK_TIMES = [
+  { blockNumber: 1, startTime: '07:00', endTime: '07:40', isActive: true },
+  { blockNumber: 2, startTime: '07:40', endTime: '08:20', isActive: true },
+  { blockNumber: 3, startTime: '08:20', endTime: '09:00', isActive: true },
+  { blockNumber: 4, startTime: '09:00', endTime: '09:40', isActive: true },
+  { blockNumber: 5, startTime: '09:40', endTime: '10:00', isActive: true },
+  { blockNumber: 6, startTime: '10:00', endTime: '10:40', isActive: true },
+  { blockNumber: 7, startTime: '10:40', endTime: '11:20', isActive: true },
+  { blockNumber: 8, startTime: '11:20', endTime: '12:00', isActive: true },
+  { blockNumber: 9, startTime: '12:20', endTime: '12:40', isActive: true },
+];
 export class ScheduleController {
   
   // Crear horario
@@ -647,151 +669,138 @@ export class ScheduleController {
   };
 
   static getChildrenSchedules = async (req: Request, res: Response) => {
-    try {
-      const tokenData = req.tokenData;
-      
-      if (!tokenData?.id) {
-        return res.status(401).json({ 
-          result: false, 
-          content: [], 
-          error: ['Autenticación requerida'] 
-        });
-      }
+  try {
+    const tokenData = req.tokenData;
+    if (!tokenData?.id) {
+      return res.status(401).json({ result: false, content: [], error: ['Autenticación requerida'] });
+    }
 
-      // 1. Buscar el representante asociado al usuario
-      const representative = await Representative.findOne({
-        where: { userId: tokenData.id },
-        include: [{
-          model: Student,
-          as: 'students',
-          attributes: ['id', 'fullName', 'currentGrade', 'section', 'status']
-        }]
-      });
+    // 1. Buscar el representante asociado al usuario
+    const representative = await Representative.findOne({
+      where: { userId: tokenData.id },
+      include: [{
+        model: Student,
+        as: 'students',
+        attributes: ['id', 'fullName', 'currentGrade', 'section', 'status']
+      }]
+    });
 
-      if (!representative || !representative.students || representative.students.length === 0) {
-        return res.status(200).json({ 
-          result: true, 
-          content: [], 
-          error: [] 
-        });
-      }
+    if (!representative || !representative.students || representative.students.length === 0) {
+      return res.status(200).json({ result: true, content: [], error: [] });
+    }
 
-      // 2. Obtener los IDs de los estudiantes (filtrando undefined)
-      const studentIds = representative.students
-        .map(s => s.id)
-        .filter((id): id is string => id !== undefined);
+    // 2. Para cada estudiante, obtener el horario general de su grado y sección
+    const result = await Promise.all(
+      representative.students.map(async (student) => {
+        const grade = student.currentGrade;
+        const section = student.section;
+        if (!grade || !section) {
+          return {
+            studentId: student.id,
+            studentName: student.fullName,
+            grade: grade || 'Sin asignar',
+            section: section || 'Sin asignar',
+            schedulesByDay: {},
+            blockTimesByDay: {}
+          };
+        }
 
-      // 3. Buscar las asociaciones estudiante-horario
-      const studentSchedules = await StudentSchedule.findAll({
-        where: { studentId: { [Op.in]: studentIds } },
-        include: [{
-          model: Schedule,
-          as: 'schedule',
+        // Obtener horarios del grado/sección
+        const schedules = await Schedule.findAll({
+          where: { grade, section },
           include: [
             {
               model: Subject,
               as: 'subject',
-              include: [{ 
-                model: Teacher, 
-                as: 'teacher',
-                attributes: ['id', 'fullName', 'email']
-              }]
+              include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName'] }]
             },
-            {
-              model: Teacher,
-              as: 'teacher',
-              attributes: ['id', 'fullName', 'email']
-            }
-          ]
-        },
-        {
-          model: Student,
-          as: 'student',
-          attributes: ['id', 'fullName', 'currentGrade', 'section']
-        }],
-        order: [
-          [{ model: Schedule, as: 'schedule' }, 'day', 'ASC'],
-          [{ model: Schedule, as: 'schedule' }, 'startBlock', 'ASC']
-        ]
-      });
+            { model: Teacher, as: 'teacher', attributes: ['id', 'fullName'] }
+          ],
+          order: [['day', 'ASC'], ['startBlock', 'ASC']]
+        });
 
-      // 4. Organizar los datos por estudiante
-      const schedulesByStudent: Record<string, any> = {};
-      
-      representative.students.forEach(student => {
-        if (student.id) {
-          schedulesByStudent[student.id] = {
-            studentId: student.id,
-            studentName: student.fullName,
-            grade: student.currentGrade,
-            section: student.section,
-            schedules: []
-          };
+        // Obtener configuración de bloques por día
+        const days = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'];
+        const blockTimesByDay: Record<string, any[]> = {};
+        for (const day of days) {
+          const config = await BlockTimeConfig.findAll({
+            where: { grade, section, day, isActive: true },
+            order: [['blockNumber', 'ASC']]
+          });
+          blockTimesByDay[day] = config.length > 0
+            ? config.map(c => ({ blockNumber: c.blockNumber, startTime: c.startTime, endTime: c.endTime, isActive: c.isActive }))
+            : DEFAULT_BLOCK_TIMES.filter(b => b.isActive);
         }
-      });
 
-      // 5. Agrupar horarios por estudiante
-      studentSchedules.forEach(ss => {
-        if (ss.schedule && ss.studentId) {
-          const scheduleInfo = {
-            scheduleId: ss.schedule.id,
-            code: ss.schedule.code,
-            day: ss.schedule.day,
-            startBlock: ss.schedule.startBlock,
-            endBlock: ss.schedule.endBlock,
-            timeRange: this.getTimeRange(ss.schedule.startBlock, ss.schedule.endBlock),
-            subject: ss.schedule.subject?.name || (ss.schedule.subjectId ? "Materia" : "RECESO"),
-            subjectCode: ss.schedule.subject?.code,
-            teacher: ss.schedule.teacher?.fullName || ss.schedule.subject?.teacher?.fullName,
-            classroom: ss.schedule.classroom,
-            scheduleType: ss.scheduleType,
-            comment1: ss.comment1,
-            comment2: ss.comment2,
-            comment3: ss.comment3,
-            assignedAt: ss.assignedAt
-          };
+        // Construir schedulesByDay similar al de getSchedulesByGradeSection
+        const schedulesByDay: any = { lunes: [], martes: [], miercoles: [], jueves: [], viernes: [] };
+        
+        // Inicializar todos los bloques (según blockTimesByDay)
+        for (const day of days) {
+          const blocksForDay = blockTimesByDay[day];
+          schedulesByDay[day] = blocksForDay.map(block => ({
+            blockId: block.blockNumber,
+            time: `${block.startTime} - ${block.endTime}`,
+            period: getPeriodName(block.blockNumber),
+            isBreak: false,
+            isOccupied: false,
+            subject: null,
+            teacher: null,
+            scheduleId: null,
+            spans: 1
+          }));
+        }
 
-          if (schedulesByStudent[ss.studentId]) {
-            schedulesByStudent[ss.studentId].schedules.push(scheduleInfo);
+        // Asignar horarios a los bloques correspondientes
+        for (const schedule of schedules) {
+          const day = schedule.day;
+          if (!day || !schedulesByDay[day]) continue;
+          
+          const startBlock = schedule.startBlock;
+          const endBlock = schedule.endBlock;
+          const isRecess = !schedule.subjectId;
+          const spans = isRecess ? 1 : 2;
+          
+          const blockIndex = schedulesByDay[day].findIndex((b: any) => b.blockId === startBlock);
+          if (blockIndex !== -1) {
+            schedulesByDay[day][blockIndex] = {
+              ...schedulesByDay[day][blockIndex],
+              subject: isRecess ? "RECESO" : schedule.subject?.name,
+              subjectCode: schedule.subject?.code,
+              teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
+              classroom: schedule.classroom,
+              scheduleId: schedule.id,
+              spans: spans,
+              isBreak: isRecess
+            };
+            if (!isRecess && spans === 2 && blockIndex + 1 < schedulesByDay[day].length) {
+              schedulesByDay[day][blockIndex + 1] = {
+                ...schedulesByDay[day][blockIndex + 1],
+                isOccupied: true,
+                occupiedBy: schedule.id
+              };
+            }
           }
         }
-      });
 
-      // 6. Convertir a array y ordenar
-      const result = Object.values(schedulesByStudent).map((student: any) => ({
-        ...student,
-        schedules: student.schedules.sort((a: any, b: any) => {
-          // Ordenar por día y bloque
-          const daysOrder: Record<string, number> = { 
-            lunes: 1, 
-            martes: 2, 
-            miercoles: 3, 
-            jueves: 4, 
-            viernes: 5 
-          };
-          const dayA = a.day as keyof typeof daysOrder;
-          const dayB = b.day as keyof typeof daysOrder;
-          return (daysOrder[dayA] || 6) - (daysOrder[dayB] || 6) || a.startBlock - b.startBlock;
-        })
-      }));
+        return {
+          studentId: student.id,
+          studentName: student.fullName,
+          grade,
+          section,
+          schedulesByDay,
+          blockTimesByDay
+        };
+      })
+    );
 
-      res.status(200).json({
-        result: true,
-        content: result,
-        error: []
-      });
+    res.status(200).json({ result: true, content: result, error: [] });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getChildrenSchedules"));
+    res.status(500).json({ result: false, content: [], error: [`Error al obtener horarios: ${error.message}`] });
+  }
+};
 
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getChildrenSchedules"));
-      res.status(500).json({ 
-        result: false, 
-        content: [], 
-        error: [`Error al obtener horarios: ${error.message}`] 
-      });
-    }
-  };
-
-  // Asignar estudiante a horario
   static assignStudentToSchedule = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     
