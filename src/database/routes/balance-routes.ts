@@ -132,7 +132,7 @@ router.get('/statistics/financial',
 );
 
 // Transacciones recientes (para dashboard)
-router.get('/transactions/recent',
+router.get('/transactions/recent', 
   authsession,
   query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
   validateRoutes,
