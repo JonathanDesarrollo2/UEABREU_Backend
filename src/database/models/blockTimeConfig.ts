@@ -16,7 +16,7 @@ export interface BlockTimeConfigAttributes {
   createdAt?: Date;
   updatedAt?: Date;
 }
-
+ 
 @Table({
   tableName: 'block_time_config',
   freezeTableName: true,
