@@ -8,6 +8,7 @@ export interface BlockTimeConfigAttributes {
   id?: string;
   grade: string;
   section: string;
+  day: string; 
   blockNumber: number;
   startTime: string;
   endTime: string;
@@ -23,7 +24,7 @@ export interface BlockTimeConfigAttributes {
   indexes: [
     {
       unique: true,
-      fields: ['grade', 'section', 'blockNumber']
+      fields: ['grade', 'section', 'day', 'blockNumber']
     }
   ]
 })
@@ -42,6 +43,10 @@ export default class BlockTimeConfig extends Model<BlockTimeConfigAttributes> {
   @AllowNull(false)
   @Column({ type: DataType.STRING(10) })
   declare section: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.ENUM('lunes', 'martes', 'miercoles', 'jueves', 'viernes')})
+  declare day: string;
 
   @AllowNull(false)
   @Column({ type: DataType.INTEGER })

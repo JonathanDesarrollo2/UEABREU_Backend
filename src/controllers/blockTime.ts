@@ -5,13 +5,12 @@ import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
 import BlockTimeConfig from "../database/models/blockTimeConfig";
 
-// Valores por defecto (los mismos que usas actualmente)
 const DEFAULT_BLOCK_TIMES = [
   { blockNumber: 1, startTime: '07:00', endTime: '07:40' },
   { blockNumber: 2, startTime: '07:40', endTime: '08:20' },
   { blockNumber: 3, startTime: '08:20', endTime: '09:00' },
   { blockNumber: 4, startTime: '09:00', endTime: '09:40' },
-  { blockNumber: 5, startTime: '09:40', endTime: '10:00' }, // receso
+  { blockNumber: 5, startTime: '09:40', endTime: '10:00' },
   { blockNumber: 6, startTime: '10:00', endTime: '10:40' },
   { blockNumber: 7, startTime: '10:40', endTime: '11:20' },
   { blockNumber: 8, startTime: '11:20', endTime: '12:00' },
@@ -20,117 +19,68 @@ const DEFAULT_BLOCK_TIMES = [
 
 export class BlockTimeConfigController {
 
-  /**
-   * Obtener configuración de bloques para un grado y sección.
-   * Si no existe, devuelve los valores por defecto.
-   */
   static getBlockTimes = async (req: Request, res: Response) => {
-  console.log('📥 [getBlockTimes] ========== INICIO ==========');
-  console.log('📥 [getBlockTimes] Query params:', req.query);
-  console.log('📥 [getBlockTimes] Headers Authorization:', req.headers.authorization ? 'Presente' : 'Ausente');
+    try {
+      const { grade, section, day } = req.query;
+      if (!grade || !section || !day) {
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: ['Grado, sección y día son requeridos']
+        });
+      }
 
-  try {
-    const { grade, section } = req.query;
-    
-    console.log('📥 [getBlockTimes] Validando parámetros...');
-    if (!grade || !section) {
-      console.warn('⚠️ [getBlockTimes] Faltan parámetros requeridos');
-      return res.status(400).json({
+      const configs = await BlockTimeConfig.findAll({
+        where: {
+          grade: grade as string,
+          section: section as string,
+          day: day as string,
+          isActive: true
+        },
+        order: [['blockNumber', 'ASC']]
+      });
+
+      let blocks;
+      if (configs.length > 0) {
+        blocks = configs.map(c => ({
+          blockNumber: c.blockNumber,
+          startTime: c.startTime,
+          endTime: c.endTime,
+          isActive: c.isActive
+        }));
+      } else {
+        blocks = DEFAULT_BLOCK_TIMES.map(b => ({ ...b, isActive: true }));
+      }
+
+      res.status(200).json({
+        result: true,
+        content: { grade, section, day, blocks },
+        error: []
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getBlockTimes"));
+      res.status(500).json({
         result: false,
         content: [],
-        error: ['Grado y sección son requeridos']
+        error: ['Error al obtener configuración de bloques']
       });
     }
-    console.log(`✅ [getBlockTimes] Parámetros válidos: grade=${grade}, section=${section}`);
-
-    console.log('🔍 [getBlockTimes] Ejecutando consulta a la base de datos...');
-    const configs = await BlockTimeConfig.findAll({
-      where: {
-        grade: grade as string,
-        section: section as string,
-        isActive: true
-      },
-      order: [['blockNumber', 'ASC']],
-      logging: (sql) => console.log('🐘 [Sequelize SQL]:', sql)  // Log de la consulta SQL generada
-    });
-
-    console.log(`✅ [getBlockTimes] Consulta exitosa. Registros encontrados: ${configs.length}`);
-
-    let blocks;
-    if (configs.length > 0) {
-      blocks = configs.map(c => ({
-        blockNumber: c.blockNumber,
-        startTime: c.startTime,
-        endTime: c.endTime,
-        isActive: c.isActive
-      }));
-      console.log('📦 [getBlockTimes] Bloques desde BD:', blocks);
-    } else {
-      blocks = DEFAULT_BLOCK_TIMES.map(b => ({
-        ...b,
-        isActive: true
-      }));
-      console.log('📦 [getBlockTimes] No hay registros en BD. Usando valores por defecto:', blocks);
-    }
-
-    const response = {
-      result: true,
-      content: {
-        grade,
-        section,
-        blocks
-      },
-      error: []
-    };
-
-    console.log('✅ [getBlockTimes] Respuesta exitosa preparada');
-    console.log('📤 [getBlockTimes] ========== FIN (200) ==========');
-    res.status(200).json(response);
-
-  } catch (error: any) {
-    console.error('❌ [getBlockTimes] ========== ERROR CAPTURADO ==========');
-    console.error('❌ [getBlockTimes] Mensaje:', error.message);
-    console.error('❌ [getBlockTimes] Stack:', error.stack);
-    console.error('❌ [getBlockTimes] Nombre del error:', error.name);
-    
-    // Si es un error de Sequelize, mostrar más detalles
-    if (error.name && error.name.startsWith('Sequelize')) {
-      console.error('❌ [getBlockTimes] Error de Sequelize detectado');
-      console.error('❌ [getBlockTimes] SQL:', error.sql);
-      console.error('❌ [getBlockTimes] Parámetros SQL:', error.parameters);
-    }
-
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getBlockTimes"));
-    
-    console.error('📤 [getBlockTimes] ========== FIN (500) ==========');
-    res.status(500).json({
-      result: false,
-      content: [],
-      error: ['Error al obtener configuración de bloques']
-    });
-  }
-};
-
-  /**
-   * Guardar o actualizar la configuración de bloques para un grado y sección.
-   * Recibe un array de bloques con sus tiempos.
-   */
+  };
   static saveBlockTimes = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
-    
     try {
-      const { grade, section, blocks } = req.body;
+      const { grade, section, day, blocks } = req.body;
 
-      if (!grade || !section || !Array.isArray(blocks)) {
+      if (!grade || !section || !day || !Array.isArray(blocks)) {
         await transaction.rollback();
         return res.status(400).json({
           result: false,
           content: [],
-          error: ['Grado, sección y array de bloques son requeridos']
+          error: ['Grado, sección, día y array de bloques son requeridos']
         });
       }
 
-      // Validar que cada bloque tenga blockNumber, startTime, endTime
+      // Validar cada bloque
       for (const block of blocks) {
         if (!block.blockNumber || !block.startTime || !block.endTime) {
           await transaction.rollback();
@@ -142,16 +92,17 @@ export class BlockTimeConfigController {
         }
       }
 
-      // Eliminar configuraciones existentes para ese grado y sección
+      // Eliminar configuraciones existentes para ese grado, sección y día
       await BlockTimeConfig.destroy({
-        where: { grade, section },
+        where: { grade, section, day },
         transaction
       });
 
-      // Crear las nuevas configuraciones
+      // Crear nuevas configuraciones incluyendo el día
       const newConfigs = blocks.map(block => ({
         grade,
         section,
+        day,   // ← AGREGADO
         blockNumber: block.blockNumber,
         startTime: block.startTime,
         endTime: block.endTime,
@@ -165,13 +116,11 @@ export class BlockTimeConfigController {
         result: true,
         content: {
           message: 'Configuración de bloques guardada exitosamente',
-          grade,
-          section,
+          grade, section, day,
           blocksCount: blocks.length
         },
         error: []
       });
-
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("saveBlockTimes"));
@@ -183,34 +132,31 @@ export class BlockTimeConfigController {
     }
   };
 
-  /**
-   * Restablecer a valores por defecto para un grado y sección
-   */
   static resetToDefault = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
-    
     try {
-      const { grade, section } = req.body;
+      const { grade, section, day } = req.body;
 
-      if (!grade || !section) {
+      if (!grade || !section || !day) {
         await transaction.rollback();
         return res.status(400).json({
           result: false,
           content: [],
-          error: ['Grado y sección son requeridos']
+          error: ['Grado, sección y día son requeridos']
         });
       }
 
       // Eliminar configuraciones existentes
       await BlockTimeConfig.destroy({
-        where: { grade, section },
+        where: { grade, section, day },
         transaction
       });
 
-      // Insertar valores por defecto
+      // Insertar valores por defecto incluyendo el día
       const defaultConfigs = DEFAULT_BLOCK_TIMES.map(block => ({
         grade,
         section,
+        day,   // ← AGREGADO
         blockNumber: block.blockNumber,
         startTime: block.startTime,
         endTime: block.endTime,
@@ -224,12 +170,10 @@ export class BlockTimeConfigController {
         result: true,
         content: {
           message: 'Configuración restablecida a valores por defecto',
-          grade,
-          section
+          grade, section, day
         },
         error: []
       });
-
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("resetToDefault"));
@@ -241,27 +185,21 @@ export class BlockTimeConfigController {
     }
   };
 
-  /**
-   * Obtener todas las configuraciones (para administración)
-   */
   static getAllConfigs = async (req: Request, res: Response) => {
     try {
       const configs = await BlockTimeConfig.findAll({
-        order: [
-          ['grade', 'ASC'],
-          ['section', 'ASC'],
-          ['blockNumber', 'ASC']
-        ]
+        order: [['grade', 'ASC'], ['section', 'ASC'], ['day', 'ASC'], ['blockNumber', 'ASC']]
       });
 
-      // Agrupar por grado y sección
+      // Agrupar por grado, sección y día
       const grouped: any = {};
       configs.forEach(c => {
-        const key = `${c.grade}-${c.section}`;
+        const key = `${c.grade}-${c.section}-${c.day}`;
         if (!grouped[key]) {
           grouped[key] = {
             grade: c.grade,
             section: c.section,
+            day: c.day,
             blocks: []
           };
         }
@@ -278,7 +216,6 @@ export class BlockTimeConfigController {
         content: Object.values(grouped),
         error: []
       });
-
     } catch (error: any) {
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getAllConfigs"));
       res.status(500).json({

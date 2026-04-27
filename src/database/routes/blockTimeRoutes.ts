@@ -8,8 +8,9 @@ const routerBlockTime = Router();
 
 routerBlockTime.get('/block-times',
   authsession,
-  query('grade').notEmpty().withMessage('Grado requerido'),
-  query('section').notEmpty().withMessage('Sección requerida'),
+  query('grade').notEmpty(),
+  query('section').notEmpty(),
+  query('day').notEmpty().isIn(['lunes','martes','miercoles','jueves','viernes']),
   validateRoutes,
   BlockTimeConfigController.getBlockTimes
 );

@@ -4,6 +4,7 @@ export interface BlockTimeConfigFull {
   grade: string;
   section: string;
   blockNumber: number;
+  day: string;
   startTime: string;
   endTime: string;
   isActive?: boolean;
@@ -36,4 +37,17 @@ export interface BlockTimeConfigResponse {
     endTime: string;
     isActive: boolean;
   }>;
+  
+}
+export interface BlockTimeConfigAttributes {
+  id?: string;
+  grade: string;
+  section: string;
+  day: string;          // ← agregado
+  blockNumber: number;
+  startTime: string;
+  endTime: string;
+  isActive?: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
