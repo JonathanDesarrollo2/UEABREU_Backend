@@ -63,21 +63,6 @@ export class ScheduleController {
         });
       }
 
-      // Verificar si el código ya existe
-      const existingSchedule = await Schedule.findOne({ 
-        where: { code: scheduleData.code },
-        transaction
-      });
-      
-      if (existingSchedule) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          result: false, 
-          content: [], 
-          error: [`El código ${scheduleData.code} ya está registrado`] 
-        });
-      }
-
       // Determinar si es receso (subjectId es null)
       const isRecess = !scheduleData.subjectId;
 
@@ -508,23 +493,6 @@ export class ScheduleController {
           content: [], 
           error: ['Horario no encontrado'] 
         });
-      }
-
-      // Si se actualiza el código, verificar que no exista
-      if (updateData.code && updateData.code !== schedule.code) {
-        const existing = await Schedule.findOne({
-          where: { code: updateData.code },
-          transaction
-        });
-        
-        if (existing) {
-          await transaction.rollback();
-          return res.status(400).json({ 
-            result: false, 
-            content: [], 
-            error: [`El código ${updateData.code} ya está registrado`] 
-          });
-        }
       }
 
       // Verificar que la materia exista (si se actualiza)

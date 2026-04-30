@@ -23,7 +23,7 @@ export default class Schedule extends Model<typeschedule_full> {
   // Código del horario (7 dígitos: 1V2526)
   @AllowNull(false)
   @Length({ min: 7, max: 7 })
-  @Column({ type: DataType.STRING(7), unique: true })
+  @Column({ type: DataType.STRING(7)})
   declare code?: string;
 
   // Información del grupo
