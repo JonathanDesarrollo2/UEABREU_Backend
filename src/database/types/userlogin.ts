@@ -48,6 +48,10 @@ export interface typeuserlogin_full {
         balance?: number; 
         status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo'; 
     }>;
+        // NUEVOS CAMPOS DE VERIFICACIÓN
+    emailVerified?: boolean;
+    verificationCode?: string | null;          // permitir null después de limpiar
+    verificationCodeExpires?: Date | null;     // permitir null
 }
 
 export interface typeuserlogin_in {

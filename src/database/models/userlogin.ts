@@ -31,6 +31,21 @@ export default class UserLogin extends Model<typeuserlogin_full> {
   })
   declare usermail?: string;
 
+  @AllowNull(true) // permite null una vez verificado
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare emailVerified?: boolean;
+
+  @AllowNull(true)
+  @Default(null)
+  @Column({ type: DataType.STRING(10) })
+  declare verificationCode?: string | null;   // <--- añadir | null
+
+  @AllowNull(true)
+  @Default(null)
+  @Column({ type: DataType.DATE })
+  declare verificationCodeExpires?: Date | null;  // <--- añadir | null
+  
   @AllowNull(false)
   @Length({ min: 4, max: 100 })
   @Column({ type: DataType.STRING(100) })

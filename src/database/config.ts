@@ -3,19 +3,18 @@ import dotenv from "dotenv";
 import colors from "colors";
 import path from "path";
 
-// Importa TODOS tus modelos (AGREGA LOS NUEVOS)
+// Importa TODOS tus modelos (AGREGA EL NUEVO)
 import UserLogin from "./models/userlogin";
 import Student from "./models/student";
 import Representative from "./models/representative";
 import Transaction from "./models/transaction";
-
-// ⭐⭐⭐ NUEVOS MODELOS A IMPORTAR ⭐⭐⭐
 import Teacher from "./models/teacher";
 import Subject from "./models/subject";
 import Schedule from "./models/Schedule";
 import StudentSchedule from "./models/StudentSchedule";
-import BlockTimeConfig from "./models/blockTimeConfig"; // <-- NUEVO (IMPORTACIÓN)
-// ⭐⭐⭐ FIN DE NUEVOS MODELOS ⭐⭐⭐
+import BlockTimeConfig from "./models/blockTimeConfig";
+import Setting from "./models/settings";
+// ⭐ NUEVO MODELO
 
 dotenv.config();
 
@@ -53,7 +52,8 @@ if (NODE_ENV === 'production') {
       Subject,
       Schedule,
       StudentSchedule,
-      BlockTimeConfig 
+      BlockTimeConfig,
+      Setting        // ⭐ Añadido aquí
     ],
     logging: console.log,
     pool: {
@@ -63,9 +63,6 @@ if (NODE_ENV === 'production') {
       idle: 10000
     }
   });
-  
-  console.log(colors.green.bold("✅ Sequelize-typescript configurado para PRODUCCIÓN (Render)"));
-
 } else {
   sequelize = new Sequelize({
     database: DB_NAME,
@@ -83,7 +80,8 @@ if (NODE_ENV === 'production') {
       Subject,
       Schedule,
       StudentSchedule,
-      BlockTimeConfig 
+      BlockTimeConfig,
+      Setting        // ⭐ Añadido aquí
     ],
     logging: console.log,
     pool: {
@@ -93,10 +91,9 @@ if (NODE_ENV === 'production') {
       idle: 10000
     }
   });
+}
   
   console.log(colors.green.bold("✅ Sequelize-typescript configurado para DESARROLLO LOCAL"));
-}
-
 // ... el resto de tu código sigue igual
 export const connectToDatabase = async () => {
   try {

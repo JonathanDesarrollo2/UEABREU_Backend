@@ -1,4 +1,4 @@
-// src/routes/index.ts
+// src/server.ts
 //#region: Importar
 import express from "express";  
 import cors from "cors";
@@ -14,6 +14,8 @@ import RouterUser from "./database/routes/routeslogin";
 import AcademicRouter from "./database/routes/academic-routes";
 import BalanceRoutes from "./database/routes/balance-routes";
 import routerBlockTime from "./database/routes/blockTimeRoutes";
+import PublicRouter from "./database/routes/publicRoutes";
+import SettingsRouter from "./database/routes/settingsRoutes";
 
 dotenv.config();
 //#endregion
@@ -47,8 +49,11 @@ server.use((req, res, next) => {
 //#endregion
 
 //#region: Rutas de la API
-// Rutas Públicas (sin autenticación)
+// Rutas Públicas existentes (login sin autenticación)
 server.use('/api/public/login', RouterUser);
+
+// ⭐ NUEVO: Rutas públicas para registro y verificación de correo
+server.use('/api/public', PublicRouter);
 
 // Rutas del Banco
 server.use('/api/bank', BankRoutes);
@@ -57,7 +62,10 @@ server.use('/api/bank', BankRoutes);
 server.use('/api/private/user', RouterUser);
 server.use('/api/private/academic', AcademicRouter);
 server.use('/api/private/balance', BalanceRoutes);
-server.use('/api/private/block', routerBlockTime );
+server.use('/api/private/block', routerBlockTime);
+
+// ⭐ NUEVO: Rutas administrativas para settings (activar/desactivar inscripciones)
+server.use('/api/private/settings', SettingsRouter);
 
 // Health check actualizado
 server.get('/api/', (req, res) => {
@@ -72,7 +80,10 @@ server.get('/api/', (req, res) => {
             balance: 'Available at /api/private/balance',
             user: 'Available at /api/private/user',
             config: 'Available at /api/private/block',
-            auth: 'Available at /api/public/login'
+            auth: 'Available at /api/public/login',
+            publicRegister: 'Available at /api/public/register',
+            publicVerify: 'Available at /api/public/verify-email',
+            settings: 'Available at /api/private/settings'
         },
         endpoints: {
             health: '/api/',
@@ -80,7 +91,9 @@ server.get('/api/', (req, res) => {
             balance_stats: '/api/private/balance/statistics/financial',
             teachers: '/api/private/academic/teacher/list',
             students: '/api/private/user/students/list',
-            block_times: '/api/private/block/block-times'
+            block_times: '/api/private/block/block-times',
+            toggle_registrations: '/api/private/settings/registrations/toggle',
+            registration_status: '/api/private/settings/registrations'
         }
     });
 });
@@ -131,7 +144,9 @@ server.use('*', (req, res) => {
             user: '/api/private/user/*',
             academic: '/api/private/academic/*',
             config: '/api/private/block/*',
-            cors_test: '/api/cors-test'
+            cors_test: '/api/cors-test',
+            public: '/api/public/register, /api/public/verify-email',
+            settings: '/api/private/settings/registrations'
         }
     });
 });
