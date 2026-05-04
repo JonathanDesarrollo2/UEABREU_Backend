@@ -7,37 +7,51 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import nodemailer from "nodemailer";
 
-// Configurar el transporte de correo usando variables de entorno
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: Number(process.env.EMAIL_PORT),
-  secure: process.env.EMAIL_PORT === '465', // true para 465 (SSL), false para otros
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// Configuración del transporte solo si hay variables de entorno
+let transporter: nodemailer.Transporter | null = null;
+if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port: Number(process.env.EMAIL_PORT) || 465,
+    secure: process.env.EMAIL_PORT === '465', // true para 465
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+  console.log('📧 Transporte de correo configurado correctamente');
+} else {
+  console.warn('⚠️  Variables de correo no definidas. No se enviarán correos reales.');
+}
 
-// Función para enviar el código de verificación
 const sendVerificationEmail = async (email: string, code: string): Promise<void> => {
-  const mailOptions = {
-    from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
-    to: email,
-    subject: "Código de verificación de cuenta",
-    html: `
-      <h2>Verificación de correo electrónico</h2>
-      <p>Gracias por registrarse. Su código de verificación es:</p>
-      <h3 style="background:#f4f4f4; padding:10px; display:inline-block;">${code}</h3>
-      <p>Este código expirará en <strong>15 minutos</strong>.</p>
-      <p>Si usted no solicitó este registro, ignore este mensaje.</p>
-    `,
-  };
+  if (!transporter) {
+    console.log(`[EMAIL] No hay transporte configurado. Código para ${email}: ${code}`);
+    return;
+  }
 
-  await transporter.sendMail(mailOptions);
+  try {
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_FROM || `"Institución" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Código de verificación de cuenta',
+      html: `
+        <h2>Verificación de correo</h2>
+        <p>Tu código de verificación es: <strong>${code}</strong></p>
+        <p>Este código expira en 15 minutos.</p>
+        <p>Si no solicitaste este registro, ignora este mensaje.</p>
+      `,
+    });
+    console.log(`[EMAIL] Mensaje enviado a ${email}: ${info.messageId}`);
+  } catch (error: any) {
+    console.error(`[EMAIL] Error enviando a ${email}:`, error.message);
+    // Opcional: lanzar error para que se registre en el log de Cloud Run
+    ErrorLog.createErrorLog(error, 'PublicController', getErrorLocation("sendVerificationEmail"));
+    throw error; // Relanza para capturar en el controlador
+  }
 };
 
 export class PublicController {
-  
   static register = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
@@ -51,41 +65,57 @@ export class PublicController {
         studentsData,
       } = req.body;
 
+      // Validaciones básicas
+      if (!usermail || !userlogin || !userpass || !userrepass) {
+        await transaction.rollback();
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: ["Faltan campos obligatorios: usermail, userlogin, userpass, userrepass"]
+        });
+      }
+
       if (userpass !== userrepass) {
         await transaction.rollback();
-        res.status(400).json({
+        return res.status(400).json({
           result: false,
           content: [],
           error: ["Las contraseñas no coinciden"]
         });
-        return;
+      }
+
+      if (!representativeData || !representativeData.fullName || !representativeData.identityCard) {
+        await transaction.rollback();
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: ["Datos del representante incompletos (fullName, identityCard requeridos)"]
+        });
       }
 
       // Verificar email existente
       const existingEmail = await UserLogin.findOne({ where: { usermail }, transaction });
       if (existingEmail) {
         await transaction.rollback();
-        res.status(202).json({
+        return res.status(202).json({
           result: false,
           content: [],
           error: [`El email ${usermail} ya está registrado`]
         });
-        return;
       }
 
       // Verificar login existente
       const existingLogin = await UserLogin.findOne({ where: { userlogin }, transaction });
       if (existingLogin) {
         await transaction.rollback();
-        res.status(202).json({
+        return res.status(202).json({
           result: false,
           content: [],
           error: [`El usuario ${userlogin} ya está en uso`]
         });
-        return;
       }
 
-      // Generar código de 5 dígitos
+      // Generar código de 5 dígitos y expiración
       const verificationCode = Math.floor(10000 + Math.random() * 90000).toString();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
 
@@ -103,29 +133,17 @@ export class PublicController {
       }, { transaction });
 
       // Crear representante
-      if (!representativeData || !representativeData.fullName || !representativeData.identityCard) {
-        await transaction.rollback();
-        res.status(400).json({
-          result: false,
-          content: [],
-          error: ["Datos del representante incompletos"]
-        });
-        return;
-      }
-
-      // Verificar cédula del representante única
       const existingRep = await Representative.findOne({
         where: { identityCard: representativeData.identityCard },
         transaction
       });
       if (existingRep) {
         await transaction.rollback();
-        res.status(202).json({
+        return res.status(202).json({
           result: false,
           content: [],
           error: [`La cédula ${representativeData.identityCard} ya está registrada`]
         });
-        return;
       }
 
       const newRepresentative = await Representative.create({
@@ -152,12 +170,11 @@ export class PublicController {
           });
           if (existStudent) {
             await transaction.rollback();
-            res.status(202).json({
+            return res.status(202).json({
               result: false,
               content: [],
               error: [`La cédula del estudiante ${student.identityCard} ya está registrada`]
             });
-            return;
           }
 
           await Student.create({
@@ -188,19 +205,18 @@ export class PublicController {
         }
       }
 
-      // Enviar correo con el código (usando la función real)
+      // Enviar correo (no revierte si falla, pero se registra el error)
       try {
         await sendVerificationEmail(usermail, verificationCode);
-      } catch (emailError: any) {
-        console.error("Error enviando correo:", emailError);
-        // No hacer rollback, el usuario fue creado correctamente
-        // Podríamos registrar el error en logs para seguimiento
-        ErrorLog.createErrorLog(emailError, 'PublicController', getErrorLocation("register - sendVerificationEmail"));
+      } catch (emailError) {
+        // El usuario ya está creado; simplemente logueamos el error
+        console.error('Error al enviar el correo de verificación:', emailError);
+        // Podrías también guardar un log en BD si lo deseas
       }
 
       await transaction.commit();
 
-      res.status(200).json({
+      return res.status(200).json({
         result: true,
         content: ["Registro exitoso. Se ha enviado un código de verificación a su correo."],
         error: []
@@ -209,7 +225,7 @@ export class PublicController {
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'PublicController', getErrorLocation("register"));
-      res.status(500).json({
+      return res.status(500).json({
         result: false,
         content: [],
         error: [`Error en el registro: ${error.message}`]
@@ -224,60 +240,50 @@ export class PublicController {
 
       if (!email || !code) {
         await transaction.rollback();
-        res.status(400).json({
+        return res.status(400).json({
           result: false,
           content: [],
           error: ["Email y código son requeridos"]
         });
-        return;
       }
 
-      const user = await UserLogin.findOne({
-        where: { usermail: email },
-        transaction
-      });
-
+      const user = await UserLogin.findOne({ where: { usermail: email }, transaction });
       if (!user) {
         await transaction.rollback();
-        res.status(404).json({
+        return res.status(404).json({
           result: false,
           content: [],
           error: ["Usuario no encontrado"]
         });
-        return;
       }
 
       if (user.emailVerified) {
         await transaction.rollback();
-        res.status(202).json({
+        return res.status(202).json({
           result: false,
           content: [],
           error: ["El correo ya ha sido verificado"]
         });
-        return;
       }
 
       if (user.verificationCode !== code) {
         await transaction.rollback();
-        res.status(202).json({
+        return res.status(202).json({
           result: false,
           content: [],
           error: ["Código de verificación inválido"]
         });
-        return;
       }
 
       if (user.verificationCodeExpires && new Date() > user.verificationCodeExpires) {
         await transaction.rollback();
-        res.status(202).json({
+        return res.status(202).json({
           result: false,
           content: [],
           error: ["El código ha expirado. Solicite uno nuevo"]
         });
-        return;
       }
 
-      // Marcar como verificado y limpiar código
       user.emailVerified = true;
       user.verificationCode = null;
       user.verificationCodeExpires = null;
@@ -285,7 +291,7 @@ export class PublicController {
 
       await transaction.commit();
 
-      res.status(200).json({
+      return res.status(200).json({
         result: true,
         content: ["Correo verificado exitosamente. Su cuenta permanece pendiente de activación."],
         error: []
@@ -294,7 +300,7 @@ export class PublicController {
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'PublicController', getErrorLocation("verifyEmail"));
-      res.status(500).json({
+      return res.status(500).json({
         result: false,
         content: [],
         error: [`Error en la verificación: ${error.message}`]
