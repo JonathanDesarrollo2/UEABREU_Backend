@@ -5,22 +5,39 @@ import Representative from "../database/models/representative";
 import Student from "../database/models/student";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
+import nodemailer from "nodemailer";
 
-// Función placeholder para envío de correo (debes implementarla)
+// Configurar el transporte de correo usando variables de entorno
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: Number(process.env.EMAIL_PORT),
+  secure: process.env.EMAIL_PORT === '465', // true para 465 (SSL), false para otros
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// Función para enviar el código de verificación
 const sendVerificationEmail = async (email: string, code: string): Promise<void> => {
-  // Ejemplo con nodemailer o consola
-  console.log(`[EMAIL] Enviando código ${code} a ${email}`);
-  // TODO: implementar envío real
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+    to: email,
+    subject: "Código de verificación de cuenta",
+    html: `
+      <h2>Verificación de correo electrónico</h2>
+      <p>Gracias por registrarse. Su código de verificación es:</p>
+      <h3 style="background:#f4f4f4; padding:10px; display:inline-block;">${code}</h3>
+      <p>Este código expirará en <strong>15 minutos</strong>.</p>
+      <p>Si usted no solicitó este registro, ignore este mensaje.</p>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
 };
 
 export class PublicController {
   
-  /**
-   * POST /public/register
-   * Registro público de representante con estudiantes.
-   * Requiere: usermail, userlogin, userpass, userrepass, representativeData, studentsData[]
-   * Crea cuenta desactivada, envía código de verificación.
-   */
   static register = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
@@ -34,7 +51,6 @@ export class PublicController {
         studentsData,
       } = req.body;
 
-      // Validaciones básicas
       if (userpass !== userrepass) {
         await transaction.rollback();
         res.status(400).json({
@@ -78,9 +94,9 @@ export class PublicController {
         usermail,
         userlogin,
         username: username || userlogin,
-        userpass, // el hook de encriptación se encargará
-        nivel: 1,          // siempre representante
-        userstatus: false, // cuenta desactivada hasta la entrevista
+        userpass,
+        nivel: 1,
+        userstatus: false,
         emailVerified: false,
         verificationCode,
         verificationCodeExpires: expiresAt,
@@ -125,12 +141,11 @@ export class PublicController {
         userId: newUser.id,
       }, { transaction });
 
-      // Crear estudiantes (si vienen)
+      // Crear estudiantes
       if (studentsData && Array.isArray(studentsData)) {
         for (const student of studentsData) {
           if (!student.fullName || !student.identityCard) continue;
 
-          // Verificar cédula única
           const existStudent = await Student.findOne({
             where: { identityCard: student.identityCard },
             transaction
@@ -163,8 +178,8 @@ export class PublicController {
             diseasesDescription: student.diseasesDescription || '',
             currentGrade: student.currentGrade || 'En asignar',
             section: student.section || 'Pendiente',
-            status: 'pendiente',          // ✅ pendiente por defecto
-            balance: 0.00,                // ✅ sin saldo
+            status: 'pendiente',
+            balance: 0.00,
             admissionDate: new Date(),
             initialSchoolYear: new Date().getFullYear().toString(),
             representativeId: newRepresentative.id,
@@ -173,11 +188,15 @@ export class PublicController {
         }
       }
 
-      // Enviar correo con el código
-      await sendVerificationEmail(usermail, verificationCode).catch(err => {
-        console.error("Error enviando correo de verificación:", err);
-        // No hacemos rollback, el usuario está creado pero puede reenviar código
-      });
+      // Enviar correo con el código (usando la función real)
+      try {
+        await sendVerificationEmail(usermail, verificationCode);
+      } catch (emailError: any) {
+        console.error("Error enviando correo:", emailError);
+        // No hacer rollback, el usuario fue creado correctamente
+        // Podríamos registrar el error en logs para seguimiento
+        ErrorLog.createErrorLog(emailError, 'PublicController', getErrorLocation("register - sendVerificationEmail"));
+      }
 
       await transaction.commit();
 
@@ -198,10 +217,6 @@ export class PublicController {
     }
   };
 
-  /**
-   * POST /public/verify-email
-   * Verifica el código de 5 dígitos enviado al correo.
-   */
   static verifyEmail = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
