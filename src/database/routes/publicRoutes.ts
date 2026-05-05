@@ -29,4 +29,6 @@ PublicRouter.post('/verify-email',
   PublicController.verifyEmail
 );
 
+PublicRouter.get('/registration-status', PublicController.getRegistrationStatus);
+
 export default PublicRouter;

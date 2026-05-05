@@ -6,6 +6,7 @@ import Student from "../database/models/student";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import nodemailer from "nodemailer";
+import Setting from "../database/models/settings";
 
 // Configuración del transporte solo si hay variables de entorno
 let transporter: nodemailer.Transporter | null = null;
@@ -307,4 +308,22 @@ export class PublicController {
       });
     }
   };
+  // Dentro de la clase PublicController
+static getRegistrationStatus = async (req: Request, res: Response) => {
+  try {
+    let setting = await Setting.findOne({ where: { key: 'registrations_enabled' } });
+    // Si no existe, lo creamos con valor por defecto false
+    if (!setting) {
+      setting = await Setting.create({
+        key: 'registrations_enabled',
+        value: 'false',
+        description: 'Controla si el registro público de representantes está habilitado'
+      });
+    }
+    const isEnabled = setting.value === 'true';
+    res.json({ result: true, content: { registrationsEnabled: isEnabled }, error: [] });
+  } catch (error: any) {
+    res.status(500).json({ result: false, content: [], error: [error.message] });
+  }
+};
 }
