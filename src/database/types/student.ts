@@ -32,6 +32,8 @@ export interface typestudent_full {
     updatedAt?: Date;
     // 💰 NUEVO CAMPO
     balance?: number;
+    previousSchool?: string;
+    municipality?: string;
 }
 
 export interface typestudent_create {

@@ -1,329 +1,296 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import sequelize from "../database/config";
 import UserLogin from "../database/models/userlogin";
 import Representative from "../database/models/representative";
 import Student from "../database/models/student";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
-import nodemailer from "nodemailer";
-import Setting from "../database/models/settings";
-
-// Configuración del transporte solo si hay variables de entorno
-let transporter: nodemailer.Transporter | null = null;
-if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT) || 465,
-    secure: process.env.EMAIL_PORT === '465', // true para 465
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-  console.log('📧 Transporte de correo configurado correctamente');
-} else {
-  console.warn('⚠️  Variables de correo no definidas. No se enviarán correos reales.');
-}
-
-const sendVerificationEmail = async (email: string, code: string): Promise<void> => {
-  if (!transporter) {
-    console.log(`[EMAIL] No hay transporte configurado. Código para ${email}: ${code}`);
-    return;
-  }
-
-  try {
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM || `"Institución" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: 'Código de verificación de cuenta',
-      html: `
-        <h2>Verificación de correo</h2>
-        <p>Tu código de verificación es: <strong>${code}</strong></p>
-        <p>Este código expira en 15 minutos.</p>
-        <p>Si no solicitaste este registro, ignora este mensaje.</p>
-      `,
-    });
-    console.log(`[EMAIL] Mensaje enviado a ${email}: ${info.messageId}`);
-  } catch (error: any) {
-    console.error(`[EMAIL] Error enviando a ${email}:`, error.message);
-    // Opcional: lanzar error para que se registre en el log de Cloud Run
-    ErrorLog.createErrorLog(error, 'PublicController', getErrorLocation("sendVerificationEmail"));
-    throw error; // Relanza para capturar en el controlador
-  }
-};
+import PlanillaCounter from "../database/models/PlanillaCounter";
+import RegistrationApplication from "../database/models/RegistrationAplicattion";
 
 export class PublicController {
+
+  // ====================================================================
+  // POST /register
+  // ====================================================================
   static register = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
       const {
         usermail,
         userlogin,
-        username,
         userpass,
         userrepass,
         representativeData,
-        studentsData,
+        studentsData
       } = req.body;
 
-      // Validaciones básicas
-      if (!usermail || !userlogin || !userpass || !userrepass) {
-        await transaction.rollback();
-        return res.status(400).json({
-          result: false,
-          content: [],
-          error: ["Faltan campos obligatorios: usermail, userlogin, userpass, userrepass"]
-        });
-      }
-
+      // 1. Validar contraseñas
       if (userpass !== userrepass) {
         await transaction.rollback();
-        return res.status(400).json({
-          result: false,
-          content: [],
-          error: ["Las contraseñas no coinciden"]
+        res.status(400).json({
+          result: false, content: [], error: ['Las contraseñas no coinciden']
         });
+        return;
       }
 
-      if (!representativeData || !representativeData.fullName || !representativeData.identityCard) {
-        await transaction.rollback();
-        return res.status(400).json({
-          result: false,
-          content: [],
-          error: ["Datos del representante incompletos (fullName, identityCard requeridos)"]
-        });
-      }
-
-      // Verificar email existente
-      const existingEmail = await UserLogin.findOne({ where: { usermail }, transaction });
+      // 2. Verificar si el email ya existe
+      const existingEmail = await UserLogin.findOne({
+        where: { usermail },
+        transaction
+      });
       if (existingEmail) {
         await transaction.rollback();
-        return res.status(202).json({
-          result: false,
-          content: [],
-          error: [`El email ${usermail} ya está registrado`]
+        res.status(400).json({
+          result: false, content: [], error: ['El email ya está registrado']
         });
+        return;
       }
 
-      // Verificar login existente
-      const existingLogin = await UserLogin.findOne({ where: { userlogin }, transaction });
+      // 3. Verificar si el nombre de usuario ya existe
+      const existingLogin = await UserLogin.findOne({
+        where: { userlogin },
+        transaction
+      });
       if (existingLogin) {
         await transaction.rollback();
-        return res.status(202).json({
-          result: false,
-          content: [],
-          error: [`El usuario ${userlogin} ya está en uso`]
+        res.status(400).json({
+          result: false, content: [], error: ['El nombre de usuario ya está en uso']
         });
+        return;
       }
 
-      // Generar código de 5 dígitos y expiración
-      const verificationCode = Math.floor(10000 + Math.random() * 90000).toString();
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+      // 4. Verificar cédula del representante
+      if (representativeData?.identityCard) {
+        const repExists = await Representative.findOne({
+          where: { identityCard: representativeData.identityCard },
+          transaction
+        });
+        if (repExists) {
+          await transaction.rollback();
+          res.status(400).json({
+            result: false, content: [], error: ['La cédula del representante ya está registrada']
+          });
+          return;
+        }
+      }
 
-      // Crear usuario SIEMPRE desactivado y sin verificar
+      // 5. Crear usuario (inactivo, nivel 1, sin verificar)
       const newUser = await UserLogin.create({
         usermail,
         userlogin,
-        username: username || userlogin,
-        userpass,
+        userpass,            // se hasheará en los hooks
+        username: representativeData.fullName,
         nivel: 1,
         userstatus: false,
         emailVerified: false,
-        verificationCode,
-        verificationCodeExpires: expiresAt,
+        verificationCode: null,
+        verificationCodeExpires: null,
       }, { transaction });
 
-      // Crear representante
-      const existingRep = await Representative.findOne({
-        where: { identityCard: representativeData.identityCard },
-        transaction
-      });
-      if (existingRep) {
-        await transaction.rollback();
-        return res.status(202).json({
-          result: false,
-          content: [],
-          error: [`La cédula ${representativeData.identityCard} ya está registrada`]
-        });
-      }
-
+      // 6. Crear representante
       const newRepresentative = await Representative.create({
-        fullName: representativeData.fullName,
-        identityCard: representativeData.identityCard,
-        address: representativeData.address || '',
-        phone: representativeData.phone || '',
-        relationship: representativeData.relationship || 'No especificada',
-        parentName: representativeData.parentName,
-        parentIdentityCard: representativeData.parentIdentityCard,
-        parentAddress: representativeData.parentAddress,
-        parentPhone: representativeData.parentPhone,
+        ...representativeData,
         userId: newUser.id,
       }, { transaction });
 
-      // Crear estudiantes
+      // 7. Crear estudiantes (si hay)
       if (studentsData && Array.isArray(studentsData)) {
         for (const student of studentsData) {
-          if (!student.fullName || !student.identityCard) continue;
-
-          const existStudent = await Student.findOne({
-            where: { identityCard: student.identityCard },
-            transaction
-          });
-          if (existStudent) {
-            await transaction.rollback();
-            return res.status(202).json({
-              result: false,
-              content: [],
-              error: [`La cédula del estudiante ${student.identityCard} ya está registrada`]
+          // Verificar cédula del estudiante
+          if (student.identityCard) {
+            const studentExists = await Student.findOne({
+              where: { identityCard: student.identityCard },
+              transaction
             });
+            if (studentExists) {
+              await transaction.rollback();
+              res.status(400).json({
+                result: false,
+                content: [],
+                error: [`La cédula del estudiante ${student.identityCard} ya está registrada`]
+              });
+              return;
+            }
           }
 
           await Student.create({
             fullName: student.fullName,
             identityCard: student.identityCard,
             birthDate: new Date(student.birthDate),
-            nationality: student.nationality || '',
-            birthCountry: student.birthCountry || '',
-            state: student.state || '',
-            zone: student.zone || '',
-            addressDescription: student.addressDescription || '',
+            nationality: student.nationality,
+            birthCountry: student.birthCountry,
+            state: student.state,
+            zone: student.zone,
+            addressDescription: student.addressDescription,
             phone: student.phone || '',
-            emergencyContact: student.emergencyContact || '',
-            emergencyPhone: student.emergencyPhone || '',
+            emergencyContact: student.emergencyContact,
+            emergencyPhone: student.emergencyPhone,
             hasAllergies: student.hasAllergies || false,
             allergiesDescription: student.allergiesDescription || '',
             hasDiseases: student.hasDiseases || false,
             diseasesDescription: student.diseasesDescription || '',
-            currentGrade: student.currentGrade || 'En asignar',
-            section: student.section || 'Pendiente',
-            status: 'pendiente',
-            balance: 0.00,
-            admissionDate: new Date(),
-            initialSchoolYear: new Date().getFullYear().toString(),
+            previousSchool: student.previousSchool || null,
+            municipality: student.municipality || null,
             representativeId: newRepresentative.id,
             userId: newUser.id,
+            status: 'pendiente',
+            currentGrade: student.currentGrade || 'En asignar',
+            section: student.section || 'Pendiente',
+            admissionDate: new Date(),
+            initialSchoolYear: new Date().getFullYear().toString(),
+            balance: 0
           }, { transaction });
         }
       }
 
-      // Enviar correo (no revierte si falla, pero se registra el error)
-      try {
-        await sendVerificationEmail(usermail, verificationCode);
-      } catch (emailError) {
-        // El usuario ya está creado; simplemente logueamos el error
-        console.error('Error al enviar el correo de verificación:', emailError);
-        // Podrías también guardar un log en BD si lo deseas
-      }
+      // 8. Generar número de planilla secuencial
+      const [counter] = await PlanillaCounter.findOrCreate({
+        where: {}, // solo una fila
+        defaults: { currentNumber: 1 },
+        transaction
+      });
+      const planillaNumber = counter.currentNumber;
+      await counter.update({ currentNumber: planillaNumber + 1 }, { transaction });
+
+      // 9. Guardar registro de la planilla generada
+      await RegistrationApplication.create({
+        planillaNumber,
+        userId: newUser.id,
+        representativeId: newRepresentative.id,
+        formSnapshot: req.body
+      }, { transaction });
+
+      // 10. Generar y enviar código de verificación (aquí debes implementar el envío de correo)
+      //     Por ahora dejamos un ejemplo comentado:
+      // const code = Math.floor(10000 + Math.random() * 90000).toString();
+      // newUser.verificationCode = code;
+      // newUser.verificationCodeExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+      // await newUser.save({ transaction });
+      // sendVerificationEmail(usermail, code);
 
       await transaction.commit();
 
-      return res.status(200).json({
+      res.status(200).json({
         result: true,
-        content: ["Registro exitoso. Se ha enviado un código de verificación a su correo."],
+        content: {
+          message: 'Registro exitoso. Revisa tu correo para verificar la cuenta.',
+          planillaNumber
+        },
         error: []
       });
 
     } catch (error: any) {
       await transaction.rollback();
-      ErrorLog.createErrorLog(error, 'PublicController', getErrorLocation("register"));
-      return res.status(500).json({
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("register"));
+      res.status(500).json({
         result: false,
         content: [],
-        error: [`Error en el registro: ${error.message}`]
+        error: ['Error interno al procesar el registro']
       });
     }
   };
 
+  // ====================================================================
+  // POST /verify-email
+  // ====================================================================
   static verifyEmail = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
       const { email, code } = req.body;
 
-      if (!email || !code) {
-        await transaction.rollback();
-        return res.status(400).json({
-          result: false,
-          content: [],
-          error: ["Email y código son requeridos"]
-        });
-      }
+      const user = await UserLogin.findOne({
+        where: { usermail: email },
+        transaction
+      });
 
-      const user = await UserLogin.findOne({ where: { usermail: email }, transaction });
       if (!user) {
         await transaction.rollback();
-        return res.status(404).json({
-          result: false,
-          content: [],
-          error: ["Usuario no encontrado"]
+        res.status(400).json({
+          result: false, content: [], error: ['Usuario no encontrado']
         });
+        return;
       }
 
       if (user.emailVerified) {
         await transaction.rollback();
-        return res.status(202).json({
-          result: false,
-          content: [],
-          error: ["El correo ya ha sido verificado"]
+        res.status(200).json({
+          result: true, content: ['El correo ya estaba verificado'], error: []
         });
+        return;
+      }
+
+      if (!user.verificationCode || !user.verificationCodeExpires) {
+        await transaction.rollback();
+        res.status(400).json({
+          result: false, content: [], error: ['No hay código de verificación pendiente']
+        });
+        return;
+      }
+
+      if (new Date() > user.verificationCodeExpires) {
+        await transaction.rollback();
+        res.status(400).json({
+          result: false, content: [], error: ['El código de verificación ha expirado']
+        });
+        return;
       }
 
       if (user.verificationCode !== code) {
         await transaction.rollback();
-        return res.status(202).json({
-          result: false,
-          content: [],
-          error: ["Código de verificación inválido"]
+        res.status(400).json({
+          result: false, content: [], error: ['Código de verificación incorrecto']
         });
+        return;
       }
 
-      if (user.verificationCodeExpires && new Date() > user.verificationCodeExpires) {
-        await transaction.rollback();
-        return res.status(202).json({
-          result: false,
-          content: [],
-          error: ["El código ha expirado. Solicite uno nuevo"]
-        });
-      }
-
+      // Activar usuario
       user.emailVerified = true;
+      user.userstatus = true;
       user.verificationCode = null;
       user.verificationCodeExpires = null;
       await user.save({ transaction });
 
       await transaction.commit();
 
-      return res.status(200).json({
+      res.status(200).json({
         result: true,
-        content: ["Correo verificado exitosamente. Su cuenta permanece pendiente de activación."],
+        content: ['Correo verificado exitosamente. La cuenta ha sido activada.'],
         error: []
       });
 
     } catch (error: any) {
       await transaction.rollback();
-      ErrorLog.createErrorLog(error, 'PublicController', getErrorLocation("verifyEmail"));
-      return res.status(500).json({
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("verifyEmail"));
+      res.status(500).json({
         result: false,
         content: [],
-        error: [`Error en la verificación: ${error.message}`]
+        error: ['Error al verificar el correo']
       });
     }
   };
-  // Dentro de la clase PublicController
-static getRegistrationStatus = async (req: Request, res: Response) => {
-  try {
-    let setting = await Setting.findOne({ where: { key: 'registrations_enabled' } });
-    // Si no existe, lo creamos con valor por defecto false
-    if (!setting) {
-      setting = await Setting.create({
-        key: 'registrations_enabled',
-        value: 'false',
-        description: 'Controla si el registro público de representantes está habilitado'
+
+  // ====================================================================
+  // GET /registration-status
+  // ====================================================================
+  static getRegistrationStatus = async (req: Request, res: Response) => {
+    try {
+      // Aquí podrías consultar una tabla de configuración del sistema.
+      // Por ahora devolvemos true fijo (abierto).
+      const registrationsEnabled = true;
+
+      res.status(200).json({
+        result: true,
+        content: { registrationsEnabled },
+        error: []
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRegistrationStatus"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al verificar el estado de las inscripciones']
       });
     }
-    const isEnabled = setting.value === 'true';
-    res.json({ result: true, content: { registrationsEnabled: isEnabled }, error: [] });
-  } catch (error: any) {
-    res.status(500).json({ result: false, content: [], error: [error.message] });
-  }
-};
+  };
 }

@@ -1,8 +1,6 @@
-// src/database/models/student.ts
 import {
   Table, Column, Model, DataType, Default, PrimaryKey,
-  IsUUID, AllowNull, Length, ForeignKey, BelongsTo,
-  HasMany
+  IsUUID, AllowNull, Length, ForeignKey, BelongsTo, HasMany
 } from "sequelize-typescript";
 import { typestudent_full } from "../types/student";
 import Representative from "./representative";
@@ -45,7 +43,6 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.STRING(100) })
   declare birthCountry?: string;
 
-  // Dirección (estructurada)
   @AllowNull(false)
   @Column({ type: DataType.STRING(50) })
   declare state?: string;
@@ -114,17 +111,27 @@ export default class Student extends Model<typestudent_full> {
   })
   declare status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo';
 
-  // 💰 NUEVO CAMPO: Balance individual del estudiante
+  // 💰 Balance individual del estudiante
   @AllowNull(false)
-@Default(0.00)
-@Column({ 
-  type: DataType.DECIMAL(12, 2),
-  get() {
-    const value = this.getDataValue('balance');
-    return value !== null && value !== undefined ? parseFloat(value) : 0.00;
-  }
-})
-declare balance?: number;
+  @Default(0.00)
+  @Column({ 
+    type: DataType.DECIMAL(12, 2),
+    get() {
+      const value = this.getDataValue('balance');
+      return value !== null && value !== undefined ? parseFloat(value) : 0.00;
+    }
+  })
+  declare balance?: number;
+
+  // ========== NUEVOS CAMPOS ==========
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(150) })
+  declare previousSchool?: string;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(100) })
+  declare municipality?: string;
+  // ===================================
 
   // Relaciones
   @ForeignKey(() => Representative)

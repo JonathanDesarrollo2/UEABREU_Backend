@@ -6,9 +6,8 @@ import { PublicController } from "../../controllers/publicController";
 
 const PublicRouter = Router();
 
-// Registro público (requiere inscripciones abiertas)
 PublicRouter.post('/register',
-  requireRegistrationOpen, // 🔒 middleware de apertura
+  requireRegistrationOpen,
   body('usermail').isEmail().withMessage('Email válido requerido'),
   body('userlogin').isLength({ min: 4 }).withMessage('Login requerido (mínimo 4 caracteres)'),
   body('userpass').isLength({ min: 6 }).withMessage('Contraseña requerida (mínimo 6 caracteres)'),
@@ -17,11 +16,13 @@ PublicRouter.post('/register',
   body('representativeData.fullName').notEmpty(),
   body('representativeData.identityCard').notEmpty(),
   body('studentsData').isArray(),
+  // Campos nuevos opcionales
+  body('studentsData.*.previousSchool').optional().isString().trim(),
+  body('studentsData.*.municipality').optional().isString().trim(),
   validateRoutes,
   PublicController.register
 );
 
-// Verificación de correo (siempre disponible)
 PublicRouter.post('/verify-email',
   body('email').isEmail().withMessage('Email válido requerido'),
   body('code').isLength({ min: 5, max: 5 }).withMessage('Código de 5 dígitos requerido'),
