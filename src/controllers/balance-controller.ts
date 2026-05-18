@@ -635,14 +635,17 @@ export class BalanceController {
       });
 
     } catch (error: any) {
-      await transaction.rollback();
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
-      res.status(500).json({
-        result: false,
-        content: [],
-        error: [`Error al realizar depósito: ${error.message}`]
-      });
-    }
+  // ← Añade esta línea
+  console.error('❌ Error real en manualDeposit:', error);
+  
+  await transaction.rollback();
+  ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
+  res.status(500).json({
+    result: false,
+    content: [],
+    error: [`Error al realizar depósito: ${error.message}`]
+  });
+}
   };
 
   // Retiro manual (MODIFICADO: acepta studentId)
