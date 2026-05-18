@@ -26,7 +26,7 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.STRING(100) })
   declare fullName?: string;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Length({ min: 6, max: 20 })
   @Column({ type: DataType.STRING(20), unique: true })
   declare identityCard?: string;

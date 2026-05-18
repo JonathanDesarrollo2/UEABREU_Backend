@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { connectToDatabase } from "./database/config";
 import { ErrorLog } from "./utility/ErrorLog";
 import { getErrorLocation } from "./utility/callerinfo";
+import { startDebtScheduler } from "./cron/DebtProcessor";
 
 dotenv.config();
 const port = process.env.PORT || 8080;
@@ -64,6 +65,9 @@ async function startServer() {
 
     server.listen(port, () => {
     });
+    if (dbConnected) {
+      startDebtScheduler();
+    }
 
   } catch (error: any) {
     console.log(colors.red.bold(`💥 Error al iniciar servidor: ${error.message}`));
