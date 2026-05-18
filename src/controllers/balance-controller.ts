@@ -607,18 +607,19 @@ export class BalanceController {
 
       // Usar valores de enum en lugar de strings
       const newTransaction = await Transaction.create({
-        representativeId: id,
-        studentId: targetStudentId,
-        type: TransactionType.DEPOSIT,
-        amount: amount,
-        description: description || 'Depósito manual',
-        paymentMethod: paymentMethod || PaymentMethod.CASH,
-        reference: reference || `MANUAL-${Date.now()}`,
-        status: TransactionStatus.COMPLETED,
-        createdBy: validCreatedBy,
-        balanceBefore: totalBefore,
-        balanceAfter: newTotalBalance
-      }, { transaction });
+      representativeId: id,
+      studentId: targetStudentId,
+      type: TransactionType.DEPOSIT,
+      amount: amount,
+      description: description || 'Depósito manual',
+      paymentMethod: paymentMethod || PaymentMethod.CASH,
+      reference: reference || `MANUAL-${Date.now()}`,
+      status: TransactionStatus.COMPLETED,
+      createdBy: validCreatedBy,
+      balanceBefore: totalBefore,
+      balanceAfter: newTotalBalance,
+      transactionDate: new Date(),  // ← añade esta línea
+    }, { transaction });
 
       await transaction.commit();
 
