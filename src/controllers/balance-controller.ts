@@ -635,9 +635,7 @@ export class BalanceController {
       });
 
     } catch (error: any) {
-  // ← Añade esta línea
-  console.error('❌ Error real en manualDeposit:', error);
-  
+  console.error('❌ ERROR REAL manualDeposit:', error);   // ← nueva línea
   await transaction.rollback();
   ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
   res.status(500).json({
