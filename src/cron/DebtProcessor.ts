@@ -44,7 +44,7 @@ export function startDebtScheduler() {
   });
 
   // Tarea diaria a las 12:00 (mediodía) – hora Venezuela
-  cron.schedule('0 12 * * *', () => {
+  cron.schedule('0 11 * * *', () => {
     console.log('[CRON] Ejecutando penalización (mediodía)');
     applyPenalty();
   }, {
