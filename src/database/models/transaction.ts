@@ -92,8 +92,11 @@ export default class Transaction extends Model {
   declare paymentMethod?: PaymentMethod;
 
   @AllowNull(true)
-  @Column({ type: DataType.STRING(100) })
-  declare reference?: string;
+@Column({
+  type: DataType.STRING(100),
+  unique: true   // ← AÑADIR ESTO
+})
+declare reference?: string;
 
   @AllowNull(false)
   @Default(TransactionStatus.COMPLETED)

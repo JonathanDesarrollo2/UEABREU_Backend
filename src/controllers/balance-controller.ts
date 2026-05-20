@@ -555,6 +555,21 @@ export class BalanceController {
         });
       }
 
+          if (reference) {
+      const existingTransaction = await Transaction.findOne({
+        where: { reference },
+        transaction: transaction
+      });
+      if (existingTransaction) {
+        await transaction.rollback();
+        return res.status(409).json({
+          result: false,
+          content: [],
+          error: [`La referencia "${reference}" ya fue utilizada en otra transacción.`]
+        });
+      }
+    }
+
       const representative = await Representative.findByPk(id, {
         transaction,
         include: [{ model: Student, as: 'students' }]
@@ -605,21 +620,20 @@ export class BalanceController {
         newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
       }
 
-      // Usar valores de enum en lugar de strings
-      const newTransaction = await Transaction.create({
+          const newTransaction = await Transaction.create({
       representativeId: id,
       studentId: targetStudentId,
       type: TransactionType.DEPOSIT,
       amount: amount,
       description: description || 'Depósito manual',
       paymentMethod: paymentMethod || PaymentMethod.CASH,
-      reference: reference || `MANUAL-${Date.now()}`,
+      reference: reference || `MANUAL-${Date.now()}`, // la referencia ahora será única
       status: TransactionStatus.COMPLETED,
       createdBy: validCreatedBy,
       balanceBefore: totalBefore,
       balanceAfter: newTotalBalance,
-      transactionDate: new Date(),  // ← añade esta línea
-    }, { transaction });
+      transactionDate: new Date(),
+    }, { transaction: transaction });
 
       await transaction.commit();
 
