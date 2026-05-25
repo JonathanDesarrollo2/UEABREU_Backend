@@ -141,4 +141,21 @@ router.get('/transactions/recent',
 router.get('/representative-by-email', 
   BalanceController.getRepresentativeByEmail);
 
+  // src/routes/balance-routes.ts
+router.get('/transactions',
+  authsession,
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  query('representativeId').optional().isUUID(),
+  query('studentId').optional().isUUID(),
+  query('type').optional().isIn(['deposit', 'withdrawal', 'payment', 'fee', 'adjustment']),
+  query('status').optional().isIn(['pending', 'completed', 'cancelled', 'failed', 'reversed']),
+  query('startDate').optional().isISO8601(),
+  query('endDate').optional().isISO8601(),
+  query('search').optional().isString(),
+  query('sortBy').optional().isIn(['createdAt', 'amount', 'type', 'student.fullName']),
+  query('sortOrder').optional().isIn(['asc', 'desc']),
+  validateRoutes,
+  BalanceController.getAllTransactions
+);
 export default router;

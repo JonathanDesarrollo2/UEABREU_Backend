@@ -930,4 +930,85 @@ static getRepresentativeByEmail = async (req: Request, res: Response) => {
     });
   }
 };
+static getAllTransactions = async (req: Request, res: Response) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      representativeId,
+      studentId,
+      type,
+      status,
+      startDate,
+      endDate,
+      search,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    const offset = (Number(page) - 1) * Number(limit);
+    const where: any = {};
+
+    if (representativeId) where.representativeId = representativeId;
+    if (studentId) where.studentId = studentId;
+    if (type) where.type = type;
+    if (status) where.status = status;
+
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
+      if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
+    }
+
+    if (search) {
+      where[Op.or] = [
+        { description: { [Op.iLike]: `%${search}%` } },
+        { reference: { [Op.iLike]: `%${search}%` } },
+        { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
+        { '$student.fullName$': { [Op.iLike]: `%${search}%` } },
+      ];
+    }
+
+    const { count, rows: transactions } = await Transaction.findAndCountAll({
+      where,
+      limit: Number(limit),
+      offset,
+      order: [[sortBy as string, sortOrder === 'asc' ? 'ASC' : 'DESC']],
+      include: [
+        {
+          model: Representative,
+          as: 'representative',
+          attributes: ['id', 'fullName', 'identityCard']
+        },
+        {
+          model: Student,
+          as: 'student',
+          required: false,
+          attributes: ['id', 'fullName', 'currentGrade']
+        }
+      ]
+    });
+
+    res.status(200).json({
+      result: true,
+      content: {
+        transactions,
+        pagination: {
+          totalRecords: count,
+          currentPage: Number(page),
+          totalPages: Math.ceil(count / Number(limit)),
+          pageSize: Number(limit)
+        }
+      },
+      error: []
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getAllTransactions"));
+    res.status(500).json({
+      result: false,
+      content: [],
+      error: ['Error al obtener transacciones']
+    });
+  }
+};
 }
