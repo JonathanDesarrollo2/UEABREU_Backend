@@ -16,51 +16,28 @@ export class PublicController {
   static register = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
-      const {
-        usermail,
-        userlogin,
-        userpass,
-        userrepass,
-        representativeData,
-        studentsData
-      } = req.body;
+      const { usermail, userlogin, userpass, userrepass, representativeData, studentsData } = req.body;
 
-      // 1. Validar contraseñas
       if (userpass !== userrepass) {
         await transaction.rollback();
-        res.status(400).json({
-          result: false, content: [], error: ['Las contraseñas no coinciden']
-        });
+        res.status(400).json({ result: false, content: [], error: ['Las contraseñas no coinciden'] });
         return;
       }
 
-      // 2. Verificar si el email ya existe
-      const existingEmail = await UserLogin.findOne({
-        where: { usermail },
-        transaction
-      });
+      const existingEmail = await UserLogin.findOne({ where: { usermail }, transaction });
       if (existingEmail) {
         await transaction.rollback();
-        res.status(400).json({
-          result: false, content: [], error: ['El email ya está registrado']
-        });
+        res.status(400).json({ result: false, content: [], error: ['El email ya está registrado'] });
         return;
       }
 
-      // 3. Verificar si el nombre de usuario ya existe
-      const existingLogin = await UserLogin.findOne({
-        where: { userlogin },
-        transaction
-      });
+      const existingLogin = await UserLogin.findOne({ where: { userlogin }, transaction });
       if (existingLogin) {
         await transaction.rollback();
-        res.status(400).json({
-          result: false, content: [], error: ['El nombre de usuario ya está en uso']
-        });
+        res.status(400).json({ result: false, content: [], error: ['El nombre de usuario ya está en uso'] });
         return;
       }
 
-      // 4. Verificar cédula del representante
       if (representativeData?.identityCard) {
         const repExists = await Representative.findOne({
           where: { identityCard: representativeData.identityCard },
@@ -68,18 +45,15 @@ export class PublicController {
         });
         if (repExists) {
           await transaction.rollback();
-          res.status(400).json({
-            result: false, content: [], error: ['La cédula del representante ya está registrada']
-          });
+          res.status(400).json({ result: false, content: [], error: ['La cédula del representante ya está registrada'] });
           return;
         }
       }
 
-      // 5. Crear usuario (inactivo, nivel 1, sin verificar)
       const newUser = await UserLogin.create({
         usermail,
         userlogin,
-        userpass,            // se hasheará en los hooks
+        userpass,
         username: representativeData.fullName,
         nivel: 1,
         userstatus: false,
@@ -88,16 +62,13 @@ export class PublicController {
         verificationCodeExpires: null,
       }, { transaction });
 
-      // 6. Crear representante
       const newRepresentative = await Representative.create({
         ...representativeData,
         userId: newUser.id,
       }, { transaction });
 
-      // 7. Crear estudiantes (si hay)
       if (studentsData && Array.isArray(studentsData)) {
         for (const student of studentsData) {
-          // Verificar cédula del estudiante
           if (student.identityCard) {
             const studentExists = await Student.findOne({
               where: { identityCard: student.identityCard },
@@ -106,8 +77,7 @@ export class PublicController {
             if (studentExists) {
               await transaction.rollback();
               res.status(400).json({
-                result: false,
-                content: [],
+                result: false, content: [],
                 error: [`La cédula del estudiante ${student.identityCard} ya está registrada`]
               });
               return;
@@ -144,16 +114,16 @@ export class PublicController {
         }
       }
 
-      // 8. Generar número de planilla secuencial
+      // Generar número de planilla secuencial
       const [counter] = await PlanillaCounter.findOrCreate({
-        where: {}, // solo una fila
+        where: {},
         defaults: { currentNumber: 1 },
         transaction
       });
       const planillaNumber = counter.currentNumber;
       await counter.update({ currentNumber: planillaNumber + 1 }, { transaction });
 
-      // 9. Guardar registro de la planilla generada
+      // Guardar registro de la planilla
       await RegistrationApplication.create({
         planillaNumber,
         userId: newUser.id,
@@ -161,13 +131,12 @@ export class PublicController {
         formSnapshot: req.body
       }, { transaction });
 
-      // 10. Generar y enviar código de verificación (aquí debes implementar el envío de correo)
-      //     Por ahora dejamos un ejemplo comentado:
-      // const code = Math.floor(10000 + Math.random() * 90000).toString();
-      // newUser.verificationCode = code;
-      // newUser.verificationCodeExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
-      // await newUser.save({ transaction });
-      // sendVerificationEmail(usermail, code);
+      // Generar y guardar código de verificación
+      const verificationCode = Math.floor(10000 + Math.random() * 90000).toString();
+      newUser.verificationCode = verificationCode;
+      newUser.verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000);
+      await newUser.save({ transaction });
+      console.log(`📧 Código de verificación para ${usermail}: ${verificationCode}`);
 
       await transaction.commit();
 
@@ -183,13 +152,9 @@ export class PublicController {
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("register"));
-      res.status(500).json({
-        result: false,
-        content: [],
-        error: ['Error interno al procesar el registro']
-      });
+      res.status(500).json({ result: false, content: [], error: ['Error interno al procesar el registro'] });
     }
-  };
+};
 
   // ====================================================================
   // POST /verify-email
@@ -206,69 +171,54 @@ export class PublicController {
 
       if (!user) {
         await transaction.rollback();
-        res.status(400).json({
-          result: false, content: [], error: ['Usuario no encontrado']
-        });
+        res.status(400).json({ result: false, content: [], error: ['Usuario no encontrado'] });
         return;
       }
 
       if (user.emailVerified) {
         await transaction.rollback();
-        res.status(200).json({
-          result: true, content: ['El correo ya estaba verificado'], error: []
-        });
+        res.status(200).json({ result: true, content: ['El correo ya estaba verificado'], error: [] });
         return;
       }
 
       if (!user.verificationCode || !user.verificationCodeExpires) {
         await transaction.rollback();
-        res.status(400).json({
-          result: false, content: [], error: ['No hay código de verificación pendiente']
-        });
+        res.status(400).json({ result: false, content: [], error: ['No hay código de verificación pendiente'] });
         return;
       }
 
       if (new Date() > user.verificationCodeExpires) {
         await transaction.rollback();
-        res.status(400).json({
-          result: false, content: [], error: ['El código de verificación ha expirado']
-        });
+        res.status(400).json({ result: false, content: [], error: ['El código de verificación ha expirado'] });
         return;
       }
 
       if (user.verificationCode !== code) {
         await transaction.rollback();
-        res.status(400).json({
-          result: false, content: [], error: ['Código de verificación incorrecto']
-        });
+        res.status(400).json({ result: false, content: [], error: ['Código de verificación incorrecto'] });
         return;
       }
 
-      // Activar usuario
+      // ✅ Solo marcar el correo como verificado, NO activar la cuenta
       user.emailVerified = true;
-      user.userstatus = true;
       user.verificationCode = null;
       user.verificationCodeExpires = null;
+      // ❌ user.userstatus = true;  ← eliminar esta línea
       await user.save({ transaction });
 
       await transaction.commit();
 
       res.status(200).json({
         result: true,
-        content: ['Correo verificado exitosamente. La cuenta ha sido activada.'],
+        content: ['Correo verificado exitosamente. La cuenta permanece pendiente de activación.'],
         error: []
       });
-
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("verifyEmail"));
-      res.status(500).json({
-        result: false,
-        content: [],
-        error: ['Error al verificar el correo']
-      });
+      res.status(500).json({ result: false, content: [], error: ['Error al verificar el correo'] });
     }
-  };
+};
 
   // ====================================================================
   // GET /registration-status

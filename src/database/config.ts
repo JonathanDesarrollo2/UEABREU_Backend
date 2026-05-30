@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import colors from "colors";
 import path from "path";
 
-// Importa TODOS tus modelos (AGREGA EL NUEVO)
+// Importa TODOS tus modelos (AGREGA LOS NUEVOS)
 import UserLogin from "./models/userlogin";
 import Student from "./models/student";
 import Representative from "./models/representative";
@@ -14,7 +14,9 @@ import Schedule from "./models/Schedule";
 import StudentSchedule from "./models/StudentSchedule";
 import BlockTimeConfig from "./models/blockTimeConfig";
 import Setting from "./models/settings";
-// ⭐ NUEVO MODELO
+// ⭐ NUEVOS MODELOS ⭐
+import PlanillaCounter from "./models/PlanillaCounter";
+import RegistrationApplication from "./models/RegistrationAplicattion"; // Ajusta el nombre si es "RegistrationApplication"
 
 dotenv.config();
 
@@ -44,16 +46,18 @@ if (NODE_ENV === 'production') {
       }
     },
     models: [
-      UserLogin, 
-      Student, 
-      Representative, 
+      UserLogin,
+      Student,
+      Representative,
       Transaction,
       Teacher,
       Subject,
       Schedule,
       StudentSchedule,
       BlockTimeConfig,
-      Setting        // ⭐ Añadido aquí
+      Setting,
+      PlanillaCounter,        // ⭐ NUEVO
+      RegistrationApplication // ⭐ NUEVO
     ],
     logging: console.log,
     pool: {
@@ -63,6 +67,7 @@ if (NODE_ENV === 'production') {
       idle: 10000
     }
   });
+
 } else {
   sequelize = new Sequelize({
     database: DB_NAME,
@@ -72,16 +77,18 @@ if (NODE_ENV === 'production') {
     port: parseInt(DB_PORT || '5434', 10),
     dialect: 'postgres',
     models: [
-      UserLogin, 
-      Student, 
-      Representative, 
+      UserLogin,
+      Student,
+      Representative,
       Transaction,
       Teacher,
       Subject,
       Schedule,
       StudentSchedule,
       BlockTimeConfig,
-      Setting        // ⭐ Añadido aquí
+      Setting,
+      PlanillaCounter,        // ⭐ NUEVO
+      RegistrationApplication // ⭐ NUEVO
     ],
     logging: console.log,
     pool: {
@@ -91,25 +98,24 @@ if (NODE_ENV === 'production') {
       idle: 10000
     }
   });
-}
-  
   console.log(colors.green.bold("✅ Sequelize-typescript configurado para DESARROLLO LOCAL"));
-// ... el resto de tu código sigue igual
+}
+
 export const connectToDatabase = async () => {
   try {
     console.log(colors.yellow.bold("🚀 Conectando a la base de datos..."));
     console.log(colors.gray(`   Host: ${DB_HOST}:${DB_PORT}`));
     console.log(colors.gray(`   Base de datos: ${DB_NAME}`));
-    
+
     await sequelize.authenticate();
     console.log(colors.green.bold('✅ Conexión a PostgreSQL establecida.'));
 
     console.log(colors.yellow.bold('🔄 Sincronizando modelos...'));
-    
+
     if (NODE_ENV === 'production') {
       await sequelize.sync();
       console.log(colors.green.bold('✅ Tablas creadas/verificadas en Render.'));
-      
+
       const userCount = await UserLogin.count();
       if (userCount === 0) {
         console.log(colors.cyan.bold('👑 Creando usuario admin por defecto...'));
@@ -128,17 +134,17 @@ export const connectToDatabase = async () => {
       // await sequelize.sync({ alter: true });
       console.log(colors.green.bold('✅ Modelos sincronizados (desarrollo).'));
     }
-    
+
     console.log(colors.green.bold('🎉 Base de datos lista!'));
-    
+
   } catch (error: any) {
     console.error(colors.red.bold('❌ Error conectando a la base de datos:'), error.message);
-    
+
     if (error.original) {
       console.error('- Error original:', error.original.message);
       console.error('- Código:', error.original.code);
     }
-    
+
     throw error;
   }
 };
