@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import sequelize from "../database/config";
-import nodemailer from 'nodemailer';                       // ← nuevo
+import nodemailer from "nodemailer";
 import UserLogin from "../database/models/userlogin";
 import Representative from "../database/models/representative";
 import Student from "../database/models/student";
@@ -9,18 +9,36 @@ import { getErrorLocation } from "../utility/callerinfo";
 import PlanillaCounter from "../database/models/PlanillaCounter";
 import RegistrationApplication from "../database/models/RegistrationAplicattion";
 
-// ------------------------------------------------------------
-// Transporter reutilizable (se crea una sola vez)
-// ------------------------------------------------------------
+// Transporte de correo (se configura una sola vez)
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
+  host: process.env.EMAIL_HOST || "smtp.gmail.com",
   port: Number(process.env.EMAIL_PORT) || 465,
-  secure: Number(process.env.EMAIL_PORT) === 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
+
+/**
+ * Envía un correo con el código de verificación.
+ */
+async function sendVerificationEmail(email: string, code: string): Promise<void> {
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || '"U.E. Antonio Abreu" <uejantonioabreu@gmail.com>',
+    to: email,
+    subject: "Código de verificación - U.E. Antonio Abreu",
+    html: `
+      <h2>Verificación de correo</h2>
+      <p>Tu código de verificación es: <strong>${code}</strong></p>
+      <p>Este código expira en 15 minutos.</p>
+      <p>Si no solicitaste este registro, ignora este mensaje.</p>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log(`📧 Correo enviado a ${email} con código ${code}`);
+}
 
 export class PublicController {
 
@@ -30,14 +48,23 @@ export class PublicController {
   static register = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
-      const { usermail, userlogin, userpass, userrepass, representativeData, studentsData } = req.body;
+      const {
+        usermail,
+        userlogin,
+        userpass,
+        userrepass,
+        representativeData,
+        studentsData
+      } = req.body;
 
+      // 1. Validar contraseñas
       if (userpass !== userrepass) {
         await transaction.rollback();
         res.status(400).json({ result: false, content: [], error: ['Las contraseñas no coinciden'] });
         return;
       }
 
+      // 2. Verificar si el email ya existe
       const existingEmail = await UserLogin.findOne({ where: { usermail }, transaction });
       if (existingEmail) {
         await transaction.rollback();
@@ -45,6 +72,7 @@ export class PublicController {
         return;
       }
 
+      // 3. Verificar si el login ya existe
       const existingLogin = await UserLogin.findOne({ where: { userlogin }, transaction });
       if (existingLogin) {
         await transaction.rollback();
@@ -52,6 +80,7 @@ export class PublicController {
         return;
       }
 
+      // 4. Verificar cédula del representante
       if (representativeData?.identityCard) {
         const repExists = await Representative.findOne({
           where: { identityCard: representativeData.identityCard },
@@ -59,15 +88,18 @@ export class PublicController {
         });
         if (repExists) {
           await transaction.rollback();
-          res.status(400).json({ result: false, content: [], error: ['La cédula del representante ya está registrada'] });
+          res.status(400).json({
+            result: false, content: [], error: ['La cédula del representante ya está registrada']
+          });
           return;
         }
       }
 
+      // 5. Crear usuario (inactivo, nivel 1, sin verificar)
       const newUser = await UserLogin.create({
         usermail,
         userlogin,
-        userpass,
+        userpass, // se hasheará en los hooks
         username: representativeData.fullName,
         nivel: 1,
         userstatus: false,
@@ -76,11 +108,13 @@ export class PublicController {
         verificationCodeExpires: null,
       }, { transaction });
 
+      // 6. Crear representante
       const newRepresentative = await Representative.create({
         ...representativeData,
         userId: newUser.id,
       }, { transaction });
 
+      // 7. Crear estudiantes (si hay)
       if (studentsData && Array.isArray(studentsData)) {
         for (const student of studentsData) {
           if (student.identityCard) {
@@ -91,7 +125,8 @@ export class PublicController {
             if (studentExists) {
               await transaction.rollback();
               res.status(400).json({
-                result: false, content: [],
+                result: false,
+                content: [],
                 error: [`La cédula del estudiante ${student.identityCard} ya está registrada`]
               });
               return;
@@ -128,7 +163,7 @@ export class PublicController {
         }
       }
 
-      // Generar número de planilla secuencial
+      // 8. Generar número de planilla secuencial
       const [counter] = await PlanillaCounter.findOrCreate({
         where: {},
         defaults: { currentNumber: 1 },
@@ -137,7 +172,7 @@ export class PublicController {
       const planillaNumber = counter.currentNumber;
       await counter.update({ currentNumber: planillaNumber + 1 }, { transaction });
 
-      // Guardar registro de la planilla
+      // 9. Guardar registro de la planilla generada
       await RegistrationApplication.create({
         planillaNumber,
         userId: newUser.id,
@@ -145,31 +180,18 @@ export class PublicController {
         formSnapshot: req.body
       }, { transaction });
 
-      // Generar y guardar código de verificación
+      // 10. Generar y guardar código de verificación
       const verificationCode = Math.floor(10000 + Math.random() * 90000).toString();
       newUser.verificationCode = verificationCode;
       newUser.verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000);
       await newUser.save({ transaction });
 
-      // -----------------------------------------------
-      // 📧 ENVIAR EL CORREO DE VERIFICACIÓN (REAL)
-      // -----------------------------------------------
-      const mailOptions = {
-        from: process.env.EMAIL_FROM || '"U.E. Antonio Abreu" <uejantonioabreu@gmail.com>',
-        to: usermail,
-        subject: 'Verifica tu correo - U.E. José Antonio Abreu',
-        text: `Tu código de verificación es: ${verificationCode}. Válido por 15 minutos.`,
-        html: `<p>Tu código de verificación es: <strong>${verificationCode}</strong></p><p>Válido por 15 minutos.</p>`,
-      };
-
+      // 11. Enviar correo de verificación (no revierte si falla)
       try {
-        await transporter.sendMail(mailOptions);
-        console.log(`📧 Correo enviado a ${usermail} con código ${verificationCode}`);
+        await sendVerificationEmail(usermail, verificationCode);
       } catch (emailError) {
-        // Si el correo falla, lo registramos pero NO hacemos rollback.
-        // El usuario ya está creado y el código guardado; podría reenviarse después.
         console.error('⚠️ Error al enviar el correo de verificación:', emailError);
-        // Opcional: podrías devolver un warning, pero no es necesario.
+        // El código sigue guardado; el usuario podría solicitar reenvío en otro momento.
       }
 
       await transaction.commit();
@@ -186,12 +208,16 @@ export class PublicController {
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("register"));
-      res.status(500).json({ result: false, content: [], error: ['Error interno al procesar el registro'] });
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error interno al procesar el registro']
+      });
     }
   };
 
   // ====================================================================
-  // POST /verify-email   (no se toca, funciona perfecto)
+  // POST /verify-email
   // ====================================================================
   static verifyEmail = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
@@ -246,6 +272,7 @@ export class PublicController {
         content: ['Correo verificado exitosamente. La cuenta permanece pendiente de activación.'],
         error: []
       });
+
     } catch (error: any) {
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("verifyEmail"));
