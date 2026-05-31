@@ -220,65 +220,75 @@ export class PublicController {
   // POST /verify-email
   // ====================================================================
   static verifyEmail = async (req: Request, res: Response) => {
-    const transaction = await sequelize.transaction();
-    try {
-      const { email, code } = req.body;
+  const transaction = await sequelize.transaction();
+  try {
+    const { email, code } = req.body;
 
-      const user = await UserLogin.findOne({
-        where: { usermail: email },
-        transaction
-      });
+    const user = await UserLogin.findOne({
+      where: { usermail: email },
+      transaction
+    });
 
-      if (!user) {
-        await transaction.rollback();
-        res.status(400).json({ result: false, content: [], error: ['Usuario no encontrado'] });
-        return;
-      }
+    if (!user) {
+      await transaction.rollback();
+      res.status(400).json({ result: false, content: [], error: ['Usuario no encontrado'] });
+      return;
+    }
 
-      if (user.emailVerified) {
-        await transaction.rollback();
-        res.status(200).json({ result: true, content: ['El correo ya estaba verificado'], error: [] });
-        return;
-      }
+    if (user.emailVerified) {
+      await transaction.rollback();
+      res.status(200).json({ result: true, content: ['El correo ya estaba verificado'], error: [] });
+      return;
+    }
 
-      if (!user.verificationCode || !user.verificationCodeExpires) {
-        await transaction.rollback();
-        res.status(400).json({ result: false, content: [], error: ['No hay código de verificación pendiente'] });
-        return;
-      }
+    if (!user.verificationCode || !user.verificationCodeExpires) {
+      await transaction.rollback();
+      res.status(400).json({ result: false, content: [], error: ['No hay código de verificación pendiente'] });
+      return;
+    }
 
-      if (new Date() > user.verificationCodeExpires) {
-        await transaction.rollback();
-        res.status(400).json({ result: false, content: [], error: ['El código de verificación ha expirado'] });
-        return;
-      }
-
-      if (user.verificationCode !== code) {
-        await transaction.rollback();
-        res.status(400).json({ result: false, content: [], error: ['Código de verificación incorrecto'] });
-        return;
-      }
-
-      // Solo marcar el correo como verificado, NO activar la cuenta
-      user.emailVerified = true;
-      user.verificationCode = null;
-      user.verificationCodeExpires = null;
-      await user.save({ transaction });
+    // 🔴 NUEVO: si expiró, eliminar todo el registro
+    if (new Date() > user.verificationCodeExpires) {
+      await RegistrationApplication.destroy({ where: { userId: user.id }, transaction });
+      await Student.destroy({ where: { userId: user.id }, transaction });
+      await Representative.destroy({ where: { userId: user.id }, transaction });
+      await user.destroy({ transaction });
 
       await transaction.commit();
-
-      res.status(200).json({
-        result: true,
-        content: ['Correo verificado exitosamente. La cuenta permanece pendiente de activación.'],
-        error: []
+      res.status(400).json({
+        result: false,
+        content: [],
+        error: ['El código de verificación ha expirado y el registro fue cancelado.']
       });
-
-    } catch (error: any) {
-      await transaction.rollback();
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("verifyEmail"));
-      res.status(500).json({ result: false, content: [], error: ['Error al verificar el correo'] });
+      return;
     }
-  };
+
+    if (user.verificationCode !== code) {
+      await transaction.rollback();
+      res.status(400).json({ result: false, content: [], error: ['Código de verificación incorrecto'] });
+      return;
+    }
+
+    // Código correcto → verificar correo (cuenta sigue inactiva)
+    user.emailVerified = true;
+    user.verificationCode = null;
+    user.verificationCodeExpires = null;
+    await user.save({ transaction });
+
+    await transaction.commit();
+
+    res.status(200).json({
+      result: true,
+      content: ['Correo verificado exitosamente. La cuenta permanece pendiente de activación.'],
+      error: []
+    });
+
+  } catch (error: any) {
+    await transaction.rollback();
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("verifyEmail"));
+    res.status(500).json({ result: false, content: [], error: ['Error al verificar el correo'] });
+  }
+};
 
   // ====================================================================
   // GET /registration-status
