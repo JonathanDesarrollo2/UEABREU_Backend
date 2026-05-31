@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import sequelize from "../database/config";
+import nodemailer from 'nodemailer';                       // ← nuevo
 import UserLogin from "../database/models/userlogin";
 import Representative from "../database/models/representative";
 import Student from "../database/models/student";
@@ -7,6 +8,19 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import PlanillaCounter from "../database/models/PlanillaCounter";
 import RegistrationApplication from "../database/models/RegistrationAplicattion";
+
+// ------------------------------------------------------------
+// Transporter reutilizable (se crea una sola vez)
+// ------------------------------------------------------------
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: Number(process.env.EMAIL_PORT) || 465,
+  secure: Number(process.env.EMAIL_PORT) === 465,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 export class PublicController {
 
@@ -136,7 +150,27 @@ export class PublicController {
       newUser.verificationCode = verificationCode;
       newUser.verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000);
       await newUser.save({ transaction });
-      console.log(`📧 Código de verificación para ${usermail}: ${verificationCode}`);
+
+      // -----------------------------------------------
+      // 📧 ENVIAR EL CORREO DE VERIFICACIÓN (REAL)
+      // -----------------------------------------------
+      const mailOptions = {
+        from: process.env.EMAIL_FROM || '"U.E. Antonio Abreu" <uejantonioabreu@gmail.com>',
+        to: usermail,
+        subject: 'Verifica tu correo - U.E. José Antonio Abreu',
+        text: `Tu código de verificación es: ${verificationCode}. Válido por 15 minutos.`,
+        html: `<p>Tu código de verificación es: <strong>${verificationCode}</strong></p><p>Válido por 15 minutos.</p>`,
+      };
+
+      try {
+        await transporter.sendMail(mailOptions);
+        console.log(`📧 Correo enviado a ${usermail} con código ${verificationCode}`);
+      } catch (emailError) {
+        // Si el correo falla, lo registramos pero NO hacemos rollback.
+        // El usuario ya está creado y el código guardado; podría reenviarse después.
+        console.error('⚠️ Error al enviar el correo de verificación:', emailError);
+        // Opcional: podrías devolver un warning, pero no es necesario.
+      }
 
       await transaction.commit();
 
@@ -154,10 +188,10 @@ export class PublicController {
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("register"));
       res.status(500).json({ result: false, content: [], error: ['Error interno al procesar el registro'] });
     }
-};
+  };
 
   // ====================================================================
-  // POST /verify-email
+  // POST /verify-email   (no se toca, funciona perfecto)
   // ====================================================================
   static verifyEmail = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
@@ -199,11 +233,10 @@ export class PublicController {
         return;
       }
 
-      // ✅ Solo marcar el correo como verificado, NO activar la cuenta
+      // Solo marcar el correo como verificado, NO activar la cuenta
       user.emailVerified = true;
       user.verificationCode = null;
       user.verificationCodeExpires = null;
-      // ❌ user.userstatus = true;  ← eliminar esta línea
       await user.save({ transaction });
 
       await transaction.commit();
@@ -218,17 +251,14 @@ export class PublicController {
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("verifyEmail"));
       res.status(500).json({ result: false, content: [], error: ['Error al verificar el correo'] });
     }
-};
+  };
 
   // ====================================================================
   // GET /registration-status
   // ====================================================================
   static getRegistrationStatus = async (req: Request, res: Response) => {
     try {
-      // Aquí podrías consultar una tabla de configuración del sistema.
-      // Por ahora devolvemos true fijo (abierto).
       const registrationsEnabled = true;
-
       res.status(200).json({
         result: true,
         content: { registrationsEnabled },
