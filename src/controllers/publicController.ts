@@ -206,6 +206,7 @@ export class PublicController {
       });
 
     } catch (error: any) {
+     console.error('❌ Error en registro:', error);   // ← agrega esto
       await transaction.rollback();
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("register"));
       res.status(500).json({
