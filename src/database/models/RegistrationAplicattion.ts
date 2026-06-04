@@ -41,4 +41,9 @@ export default class RegistrationApplication extends Model {
   @AllowNull(true)
   @Column({ type: DataType.JSONB })
   declare formSnapshot?: object;
+
+  // NUEVO CAMPO para almacenar el PDF
+  @AllowNull(true)
+  @Column({ type: DataType.BLOB })
+  declare pdfDocument?: Buffer;
 }
