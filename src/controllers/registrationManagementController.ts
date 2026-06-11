@@ -106,39 +106,45 @@ export class RegistrationManagementController {
   };
 
   // Eliminar completamente el registro
-  static deleteApplication = async (req: Request, res: Response) => {
-    const transaction = await sequelize.transaction();
-    try {
-      const { id } = req.params;
-      const application = await RegistrationApplication.findByPk(id, { transaction });
+  // Reemplaza el método deleteApplication en RegistrationManagementController.ts
+static deleteApplication = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const application = await RegistrationApplication.findByPk(id, { transaction });
 
-      if (!application) {
-        await transaction.rollback();
-        res.status(404).json({ result: false, content: [], error: ["Solicitud no encontrada"] });
-        return;
-      }
-
-      // Eliminar en orden para respetar claves foráneas
-      // 1. Estudiantes
-      await Student.destroy({ where: { userId: application.userId }, transaction });
-      // 2. Representante
-      await Representative.destroy({ where: { userId: application.userId }, transaction });
-      // 3. Usuario
-      await UserLogin.destroy({ where: { id: application.userId }, transaction });
-      // 4. La propia solicitud
-      await application.destroy({ transaction });
-
-      await transaction.commit();
-
-      res.status(200).json({
-        result: true,
-        content: [`Registro de la planilla N° ${application.planillaNumber} eliminado completamente.`],
-        error: [],
-      });
-    } catch (error: any) {
+    if (!application) {
       await transaction.rollback();
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("deleteApplication"));
-      res.status(500).json({ result: false, content: [], error: ["Error al eliminar el registro"] });
+      res.status(404).json({ result: false, content: [], error: ["Solicitud no encontrada"] });
+      return;
     }
-  };
+
+    // Orden correcto para respetar claves foráneas:
+    // 1. Estudiantes (referencian a Representative y UserLogin)
+    await Student.destroy({ where: { userId: application.userId }, transaction });
+
+    // 2. La propia solicitud (referencia a Representative y UserLogin)
+    await application.destroy({ transaction });
+
+    // 3. Representante (referencia a UserLogin)
+    await Representative.destroy({ where: { userId: application.userId }, transaction });
+
+    // 4. Usuario
+    await UserLogin.destroy({ where: { id: application.userId }, transaction });
+
+    await transaction.commit();
+
+    res.status(200).json({
+      result: true,
+      content: [`Registro de la planilla N° ${application.planillaNumber} eliminado completamente.`],
+      error: [],
+    });
+  } catch (error: any) {
+    await transaction.rollback();
+    // Log detallado para depuración
+    console.error('Error al eliminar registro:', error);
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("deleteApplication"));
+    res.status(500).json({ result: false, content: [], error: ["Error al eliminar el registro"] });
+  }
+};
 }
