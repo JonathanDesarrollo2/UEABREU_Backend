@@ -4,6 +4,7 @@ import RegistrationApplication from "../database/models/RegistrationAplicattion"
 import UserLogin from "../database/models/userlogin";
 import Representative from "../database/models/representative";
 import Student from "../database/models/student";
+const pdfParse = require('pdf-parse');
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 
@@ -150,4 +151,31 @@ static deleteApplication = async (req: Request, res: Response) => {
     res.status(500).json({ result: false, content: [], error: ["Error al eliminar el registro"] });
   }
 };
+static async diagnosticText(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const application = await RegistrationApplication.findByPk(id, {
+      attributes: ['pdfDocument', 'planillaNumber'],
+    });
+
+    if (!application || !application.pdfDocument) {
+      res.status(404).json({ result: false, content: [], error: ['PDF no encontrado'] });
+      return;
+    }
+
+    // Extraer el texto del PDF
+    const data = await pdfParse(application.pdfDocument);
+
+    res.status(200).json({
+      result: true,
+      content: {
+        text: data.text,           // aquí verás los datos
+        info: data.info,
+      },
+      error: [],
+    });
+  } catch (error: any) {
+    res.status(500).json({ result: false, content: [], error: [error.message] });
+  }
+}
 }

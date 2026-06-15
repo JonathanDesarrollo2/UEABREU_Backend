@@ -40,4 +40,12 @@ RegistrationManagementRouter.delete(
   RegistrationManagementController.deleteApplication
 );
 
+RegistrationManagementRouter.get(
+  '/:id/diagnostic-text',
+  authsession,
+  param('id').isUUID().withMessage('ID inválido'),
+  validateRoutes,
+  RegistrationManagementController.diagnosticText
+);
+
 export default RegistrationManagementRouter;
