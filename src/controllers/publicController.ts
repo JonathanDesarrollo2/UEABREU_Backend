@@ -10,7 +10,8 @@ import PlanillaCounter from "../database/models/PlanillaCounter";
 import RegistrationApplication from "../database/models/RegistrationAplicattion";
 import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
-(pdfMake as any).vfs = pdfFonts;
+
+(pdfMake as any).vfs = (pdfFonts as any).vfs;
 // Transporte de correo
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || "smtp.gmail.com",

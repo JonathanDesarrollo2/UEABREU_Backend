@@ -7,7 +7,7 @@ import Student from "../database/models/student";
 const pdfParse = require('pdf-parse');
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
-
+import pdfMake from 'pdfmake/build/pdfmake';
 export class RegistrationManagementController {
 
   // Listar todas las solicitudes de inscripción
@@ -183,21 +183,13 @@ static async diagnosticText(req: Request, res: Response) {
 }
 static async testMinimalPdf(req: Request, res: Response) {
   try {
-    const PdfPrinter = require('pdfmake/src/printer');
-    const fonts = require('pdfmake/build/vfs_fonts').vfs;
-    
-    const printer = new PdfPrinter(fonts);
-    const docDefinition = { content: 'Hola, este PDF funciona. Si ves esto, las fuentes están bien.' };
-    const pdfDoc = printer.createPdfKitDocument(docDefinition);
-    
-    const chunks: Buffer[] = [];
-    pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk));
-    pdfDoc.on('end', () => {
-      const result = Buffer.concat(chunks);
+    const docDefinition = {
+      content: 'Hola, este PDF funciona. Si ves esto, las fuentes están bien.'
+    };
+    pdfMake.createPdf(docDefinition).getBuffer((buffer: Buffer) => {
       res.setHeader('Content-Type', 'application/pdf');
-      res.send(result);
+      res.send(buffer);
     });
-    pdfDoc.end();
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
