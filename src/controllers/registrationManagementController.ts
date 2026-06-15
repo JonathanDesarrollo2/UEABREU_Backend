@@ -184,7 +184,10 @@ static async diagnosticText(req: Request, res: Response) {
 static async testMinimalPdf(req: Request, res: Response) {
   try {
     const docDefinition = {
-      content: 'Hola, este PDF funciona. Si ves esto, las fuentes están bien.'
+      content: 'Hola, este PDF funciona. Fuentes correctas.',
+      defaultStyle: {
+        font: 'Courier', // No requiere vfs
+      },
     };
     pdfMake.createPdf(docDefinition).getBuffer((buffer: Buffer) => {
       res.setHeader('Content-Type', 'application/pdf');

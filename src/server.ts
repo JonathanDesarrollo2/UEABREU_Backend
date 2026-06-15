@@ -7,7 +7,8 @@ import path from "path";
 import { corsConfig } from "./config/cors";
 import { ErrorLog } from "./utility/ErrorLog";
 import { getErrorLocation } from "./utility/callerinfo";
-
+// Configurar fuentes de pdfmake (debe ser lo primero)
+import './config/pdfConfig';
 // Importar rutas
 import BankRoutes from "./bank/routes/bank-routes";
 import RouterUser from "./database/routes/routeslogin";
