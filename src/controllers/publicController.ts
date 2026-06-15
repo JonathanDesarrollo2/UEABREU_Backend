@@ -310,7 +310,7 @@ export class PublicController {
       await counter.update({ currentNumber: planillaNumber + 1 }, { transaction });
 
       // 9. Generar PDF de la planilla
-      const pdfBuffer = await generatePlanillaPDFBuffer(
+            const pdfBuffer = await generatePlanillaPDFBuffer(
         req.body,
         planillaNumber,
         (fecha: string) => {
@@ -323,6 +323,8 @@ export class PublicController {
           return edad;
         }
       );
+            console.log(`📄 PDF generado, tamaño: ${pdfBuffer.length} bytes`);
+      console.log(`📄 Primeros 50 caracteres: ${pdfBuffer.toString('utf8', 0, 50)}`);
 
       // 10. Guardar registro de la planilla (con el PDF)
       await RegistrationApplication.create({

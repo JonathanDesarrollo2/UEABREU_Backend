@@ -45,25 +45,28 @@ export class RegistrationManagementController {
 
   // Descargar el PDF almacenado
   static downloadPdf = async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const application = await RegistrationApplication.findByPk(id, {
-        attributes: ["pdfDocument", "planillaNumber"],
-      });
+  try {
+    const { id } = req.params;
+    const application = await RegistrationApplication.findByPk(id, {
+      attributes: ["pdfDocument", "planillaNumber"],
+    });
 
-      if (!application || !application.pdfDocument) {
-        res.status(404).json({ result: false, content: [], error: ["PDF no encontrado"] });
-        return;
-      }
-
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename=Planilla_${application.planillaNumber}.pdf`);
-      res.send(application.pdfDocument);
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("downloadPdf"));
-      res.status(500).json({ result: false, content: [], error: ["Error al descargar el PDF"] });
+    if (!application || !application.pdfDocument) {
+      res.status(404).json({ result: false, content: [], error: ["PDF no encontrado"] });
+      return;
     }
-  };
+
+    // Log de diagnóstico (añadido)
+    console.log(`📄 Enviando PDF planilla ${application.planillaNumber}, tamaño: ${application.pdfDocument.length} bytes`);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=Planilla_${application.planillaNumber}.pdf`);
+    res.send(application.pdfDocument);
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("downloadPdf"));
+    res.status(500).json({ result: false, content: [], error: ["Error al descargar el PDF"] });
+  }
+};
 
   // Activar cuenta (admitir solicitud)
   static activateApplication = async (req: Request, res: Response) => {
