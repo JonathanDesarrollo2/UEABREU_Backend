@@ -163,14 +163,17 @@ static async diagnosticText(req: Request, res: Response) {
       return;
     }
 
-    // Extraer el texto del PDF
-    const data = await pdfParse(application.pdfDocument);
+    // Convertir el buffer a texto UTF-8 (los caracteres no imprimibles se verán como símbolos)
+    const rawText = application.pdfDocument.toString('utf8', 0, 1500); // primeros 1500 bytes
+
+    // Limpiar caracteres extraños para que se vea legible en JSON
+    const preview = rawText.replace(/[^\x20-\x7EáéíóúñÁÉÍÓÚÑüÜ]/g, ' ').substring(0, 1000);
 
     res.status(200).json({
       result: true,
       content: {
-        text: data.text,           // aquí verás los datos
-        info: data.info,
+        size: application.pdfDocument.length,
+        preview, // texto crudo (verás nombres, encabezados, etc.)
       },
       error: [],
     });
