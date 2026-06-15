@@ -7,7 +7,7 @@ import Student from "../database/models/student";
 const pdfParse = require('pdf-parse');
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
-import pdfMake from 'pdfmake/build/pdfmake';
+
 export class RegistrationManagementController {
 
   // Listar todas las solicitudes de inscripción
@@ -163,38 +163,19 @@ static async diagnosticText(req: Request, res: Response) {
       return;
     }
 
-    // Convertir el buffer a texto UTF-8 (los caracteres no imprimibles se verán como símbolos)
-    const rawText = application.pdfDocument.toString('utf8', 0, 1500); // primeros 1500 bytes
-
-    // Limpiar caracteres extraños para que se vea legible en JSON
-    const preview = rawText.replace(/[^\x20-\x7EáéíóúñÁÉÍÓÚÑüÜ]/g, ' ').substring(0, 1000);
+    // Extraer el texto del PDF
+    const data = await pdfParse(application.pdfDocument);
 
     res.status(200).json({
       result: true,
       content: {
-        size: application.pdfDocument.length,
-        preview, // texto crudo (verás nombres, encabezados, etc.)
+        text: data.text,           // aquí verás los datos
+        info: data.info,
       },
       error: [],
     });
   } catch (error: any) {
     res.status(500).json({ result: false, content: [], error: [error.message] });
-  }
-}
-static async testMinimalPdf(req: Request, res: Response) {
-  try {
-    const docDefinition = {
-      content: 'Hola, este PDF funciona. Fuentes correctas.',
-      defaultStyle: {
-        font: 'Courier', // No requiere vfs
-      },
-    };
-    pdfMake.createPdf(docDefinition).getBuffer((buffer: Buffer) => {
-      res.setHeader('Content-Type', 'application/pdf');
-      res.send(buffer);
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
   }
 }
 }

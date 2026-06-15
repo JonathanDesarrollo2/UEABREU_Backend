@@ -31,7 +31,7 @@
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.7",
     "pdf-parse": "^2.4.5",
-    "pdfmake": "^0.2.23",
+    "pdfmake": "^0.2.9",
     "pg": "^8.16.3",
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.7",
