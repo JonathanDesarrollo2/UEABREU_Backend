@@ -8,11 +8,7 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import PlanillaCounter from "../database/models/PlanillaCounter";
 import RegistrationApplication from "../database/models/RegistrationAplicattion";
-import pdfMake from 'pdfmake/build/pdfmake';
-import pdfFonts from 'pdfmake/build/vfs_fonts';
 
-// Configurar fuentes de pdfmake
-(pdfMake as any).vfs = pdfFonts.vfs;
 
 // Transporte de correo
 const transporter = nodemailer.createTransport({
@@ -25,126 +21,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-/**
- * Genera el PDF de la planilla y devuelve un Buffer.
- * Versión sin logo para evitar dependencias de archivos.
- */
-async function generatePlanillaPDFBuffer(
-  data: any,
-  planillaNumber: number,
-  _calcularEdad: (fecha: string) => number | string
-): Promise<Buffer> {
-  // Función para calcular edad (misma lógica del frontend)
-  const calcEdad = (fecha: string): number | string => {
-    if (!fecha) return '';
-    const hoy = new Date();
-    const nac = new Date(fecha);
-    let edad = hoy.getFullYear() - nac.getFullYear();
-    const mes = hoy.getMonth() - nac.getMonth();
-    if (mes < 0 || (mes === 0 && hoy.getDate() < nac.getDate())) edad--;
-    return edad;
-  };
-
-  const docDefinition: any = {
-    pageSize: 'A4',
-    pageMargins: [20, 20, 20, 20],
-    content: [
-      // Sin logo
-      { text: 'PLANILLA DE SOLICITUD DE INSCRIPCIÓN', style: 'title' },
-      { text: 'U.E. José Antonio Abreu - Naguanagua', style: 'subtitle' },
-      { text: `N° de Planilla: ${planillaNumber}    |    Fecha: ${new Date().toLocaleDateString()}`, style: 'date' },
-      { text: '\n' },
-      {
-        layout: 'noBorders',
-        table: {
-          widths: ['*', '*'],
-          body: [
-            [
-              {
-                stack: [
-                  { text: '1. DATOS DEL REPRESENTANTE', style: 'sectionHeader' },
-                  { text: `Nombre y Apellido: ${data.representativeData.fullName}` },
-                  { text: `Cédula de Identidad: ${data.representativeData.identityCard}` },
-                  { text: `Dirección: ${data.representativeData.address}` },
-                  { text: `Teléfono: ${data.representativeData.phone}` },
-                  { text: `Relación con el estudiante: ${data.representativeData.relationship}` },
-                  { text: `Nombre del Padre/Madre: ${data.representativeData.parentName || '-'}` },
-                  { text: `Cédula Padre/Madre: ${data.representativeData.parentIdentityCard || '-'}` },
-                  { text: `Teléfono Padre/Madre: ${data.representativeData.parentPhone || '-'}` },
-                ],
-                margin: [0, 0, 5, 0],
-              },
-              {
-                stack: [
-                  { text: '2. DATOS DE LOS SOLICITANTES', style: 'sectionHeader' },
-                  ...data.studentsData.map((est: any, idx: number) => ({
-                    stack: [
-                      { text: `Solicitante ${idx + 1}`, style: 'studentTitle' },
-                      { text: `Nombre: ${est.fullName}` },
-                      { text: `Edad: ${calcEdad(est.birthDate)}` },
-                      { text: `Fecha Nac.: ${est.birthDate}` },
-                      { text: `Nacionalidad: ${est.nationality}` },
-                      { text: `País Nac.: ${est.birthCountry}` },
-                      { text: `Estado: ${est.state}` },
-                      { text: `Zona donde vive: ${est.zone}` },
-                      { text: `Municipio: ${est.municipality || '-'}` },
-                      { text: `Escuela de procedencia: ${est.previousSchool || '-'}` },
-                      { text: `Año que aspira: ${est.currentGrade || est.aspiredGrade || 'En asignar'}` },
-                      { text: `Dirección: ${est.addressDescription}` },
-                      { text: `Teléfono: ${est.phone || '-'}` },
-                      { text: `Emergencia: ${est.emergencyContact}` },
-                      { text: `Tel. Emerg.: ${est.emergencyPhone}` },
-                      { text: `Alergias: ${est.hasAllergies ? est.allergiesDescription : 'No'}` },
-                      { text: `Enfermedades: ${est.hasDiseases ? est.diseasesDescription : 'No'}` },
-                    ],
-                    margin: [0, 0, 0, 8],
-                  })),
-                ],
-              },
-            ],
-          ],
-        },
-      },
-      { text: '\n' },
-      { text: 'Para uso del representante:', style: 'bold' },
-      {
-        layout: 'noBorders',
-        table: {
-          widths: ['*', '*', '*', '*'],
-          body: [
-            [
-              '_________________\nFirma del Representante',
-              '_________________\nFirma de quien recibe',
-              '_________________\nSello',
-              'Fecha y hora: ________\n(Uso interno)',
-            ],
-          ],
-        },
-      },
-      { text: '\n' },
-      {
-        text: 'Nota: Esta planilla es solo una solicitud de preinscripción, no asegura ni garantiza un cupo definitivo. La aprobación está sujeta a disponibilidad y evaluación de la U.E. José Antonio Abreu.',
-        style: 'note',
-      },
-    ],
-    styles: {
-      title: { fontSize: 14, bold: true, alignment: 'center', margin: [0, 5, 0, 0] },
-      subtitle: { fontSize: 10, alignment: 'center', margin: [0, 0, 0, 5] },
-      date: { fontSize: 9, alignment: 'center', margin: [0, 0, 0, 10] },
-      sectionHeader: { fontSize: 11, bold: true, decoration: 'underline', margin: [0, 0, 0, 4] },
-      studentTitle: { fontSize: 10, bold: true, margin: [0, 4, 0, 2] },
-      note: { fontSize: 8, alignment: 'center', color: 'red', margin: [0, 10, 0, 0] },
-      bold: { bold: true, fontSize: 9 },
-    },
-    defaultStyle: { fontSize: 8, lineHeight: 1.15 },
-  };
-
-  return new Promise((resolve, reject) => {
-    pdfMake.createPdf(docDefinition).getBuffer((buffer: Buffer) => {
-      resolve(buffer);
-    });
-  });
-}
 
 /**
  * Envía un correo con el código de verificación y el PDF adjunto.
@@ -191,7 +67,8 @@ export class PublicController {
         userpass,
         userrepass,
         representativeData,
-        studentsData
+        studentsData,
+        pdfBase64          // ⬅️ nuevo campo
       } = req.body;
 
       // 1. Validar contraseñas
@@ -309,24 +186,13 @@ export class PublicController {
       const planillaNumber = counter.currentNumber;
       await counter.update({ currentNumber: planillaNumber + 1 }, { transaction });
 
-      // 9. Generar PDF de la planilla
-            const pdfBuffer = await generatePlanillaPDFBuffer(
-        req.body,
-        planillaNumber,
-        (fecha: string) => {
-          if (!fecha) return '';
-          const hoy = new Date();
-          const nac = new Date(fecha);
-          let edad = hoy.getFullYear() - nac.getFullYear();
-          const mes = hoy.getMonth() - nac.getMonth();
-          if (mes < 0 || (mes === 0 && hoy.getDate() < nac.getDate())) edad--;
-          return edad;
-        }
-      );
-            console.log(`📄 PDF generado, tamaño: ${pdfBuffer.length} bytes`);
-      console.log(`📄 Primeros 50 caracteres: ${pdfBuffer.toString('utf8', 0, 50)}`);
+      // 9. Convertir el PDF recibido en base64 a Buffer (si viene)
+      let pdfBuffer: Buffer | null = null;
+      if (pdfBase64) {
+        pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      }
 
-      // 10. Guardar registro de la planilla (con el PDF)
+      // 10. Guardar registro de la planilla (con el PDF si existe)
       await RegistrationApplication.create({
         planillaNumber,
         userId: newUser.id,
@@ -341,9 +207,34 @@ export class PublicController {
       newUser.verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000);
       await newUser.save({ transaction });
 
-      // 12. Enviar correo con código y PDF adjunto
+      // 12. Enviar correo con código (y adjuntar PDF si está disponible)
       try {
-        await sendVerificationEmail(usermail, verificationCode, pdfBuffer);
+        const mailOptions: any = {
+          from: process.env.EMAIL_FROM || '"U.E. Antonio Abreu" <uejantonioabreu@gmail.com>',
+          to: usermail,
+          subject: pdfBuffer
+            ? "Código de verificación y planilla - U.E. Antonio Abreu"
+            : "Código de verificación - U.E. Antonio Abreu",
+          html: `
+            <h2>Verificación de correo</h2>
+            <p>Tu código de verificación es: <strong>${verificationCode}</strong></p>
+            <p>Este código expira en 15 minutos.</p>
+            ${pdfBuffer ? '<p>Adjuntamos la planilla de solicitud en PDF.</p>' : ''}
+            <p>Si no solicitaste este registro, ignora este mensaje.</p>
+          `,
+        };
+
+        if (pdfBuffer) {
+          mailOptions.attachments = [
+            {
+              filename: 'Planilla_Inscripcion.pdf',
+              content: pdfBuffer,
+            },
+          ];
+        }
+
+        await transporter.sendMail(mailOptions);
+        console.log(`📧 Correo enviado a ${usermail} con código ${verificationCode}` + (pdfBuffer ? ' y PDF adjunto' : ''));
       } catch (emailError) {
         console.error('⚠️ Error al enviar el correo de verificación:', emailError);
       }
