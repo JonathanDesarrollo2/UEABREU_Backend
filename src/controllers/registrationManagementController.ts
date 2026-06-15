@@ -181,4 +181,25 @@ static async diagnosticText(req: Request, res: Response) {
     res.status(500).json({ result: false, content: [], error: [error.message] });
   }
 }
+static async testMinimalPdf(req: Request, res: Response) {
+  try {
+    const PdfPrinter = require('pdfmake/src/printer');
+    const fonts = require('pdfmake/build/vfs_fonts').vfs;
+    
+    const printer = new PdfPrinter(fonts);
+    const docDefinition = { content: 'Hola, este PDF funciona. Si ves esto, las fuentes están bien.' };
+    const pdfDoc = printer.createPdfKitDocument(docDefinition);
+    
+    const chunks: Buffer[] = [];
+    pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    pdfDoc.on('end', () => {
+      const result = Buffer.concat(chunks);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.send(result);
+    });
+    pdfDoc.end();
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}
 }

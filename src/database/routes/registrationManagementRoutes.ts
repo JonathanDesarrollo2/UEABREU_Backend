@@ -47,5 +47,9 @@ RegistrationManagementRouter.get(
   validateRoutes,
   RegistrationManagementController.diagnosticText
 );
-
+RegistrationManagementRouter.get(
+  '/test-minimal-pdf',
+  authsession,
+  RegistrationManagementController.testMinimalPdf
+);
 export default RegistrationManagementRouter;
