@@ -12,17 +12,7 @@ import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
 
 // Configurar fuentes de pdfmake
-(pdfMake as any).vfs = pdfFonts.vfs;
-// Configurar fuentes de pdfmake correctamente
 (pdfMake as any).vfs = (pdfFonts as any).vfs;
-(pdfMake as any).fonts = {
-  Roboto: {
-    normal: 'Roboto-Regular.ttf',
-    bold: 'Roboto-Medium.ttf',
-    italics: 'Roboto-Italic.ttf',
-    bolditalics: 'Roboto-MediumItalic.ttf'
-  }
-};
 // Transporte de correo
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || "smtp.gmail.com",
