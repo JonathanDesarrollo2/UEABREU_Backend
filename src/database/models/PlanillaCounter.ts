@@ -11,3 +11,4 @@ export default class PlanillaCounter extends Model {
   @Column({ type: DataType.INTEGER })
   declare currentNumber: number;
 }
+
