@@ -7,42 +7,74 @@ import Student from "../database/models/student";
 const pdfParse = require('pdf-parse');
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
+import { Op } from "sequelize";
 
 export class RegistrationManagementController {
 
   // Listar todas las solicitudes de inscripción
-  static listApplications = async (req: Request, res: Response) => {
-    try {
-      const applications = await RegistrationApplication.findAll({
-        attributes: ["id", "planillaNumber", "createdAt", "userId", "representativeId"],
-        include: [
-          {
-            model: UserLogin,
-            attributes: ["usermail", "userstatus"],
-          },
-          {
-            model: Representative,
-            attributes: ["fullName"],
-          },
-        ],
-        order: [["createdAt", "DESC"]],
-      });
+ static listApplications = async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const search = (req.query.search as string) || '';
+    const offset = (page - 1) * limit;
 
-      const result = applications.map((app) => ({
-        id: app.id,
-        planillaNumber: app.planillaNumber,
-        email: app.user?.usermail,
-        representativeName: app.representative?.fullName,
-        userActive: app.user?.userstatus ?? false,
-        createdAt: app.createdAt,
-      }));
-
-      res.status(200).json({ result: true, content: result, error: [] });
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listApplications"));
-      res.status(500).json({ result: false, content: [], error: ["Error al obtener solicitudes"] });
+    const where: any = {};
+    if (search) {
+      const orConditions: any[] = [
+        { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
+        { '$user.usermail$': { [Op.iLike]: `%${search}%` } },
+      ];
+      // Si el texto es un número, también buscamos por planillaNumber
+      if (!isNaN(Number(search))) {
+        orConditions.push({ planillaNumber: Number(search) });
+      }
+      where[Op.or] = orConditions;
     }
-  };
+
+    const { count, rows: applications } = await RegistrationApplication.findAndCountAll({
+      where,
+      attributes: ["id", "planillaNumber", "createdAt", "userId", "representativeId"],
+      include: [
+        {
+          model: UserLogin,
+          attributes: ["usermail", "userstatus"],
+        },
+        {
+          model: Representative,
+          attributes: ["fullName"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
+      distinct: true, // importante cuando hay includes
+    });
+
+    const result = applications.map((app) => ({
+      id: app.id,
+      planillaNumber: app.planillaNumber,
+      email: app.user?.usermail,
+      representativeName: app.representative?.fullName,
+      userActive: app.user?.userstatus ?? false,
+      createdAt: app.createdAt,
+    }));
+
+    res.status(200).json({
+      result: true,
+      content: result,
+      pagination: {
+        totalRecords: count,
+        currentPage: page,
+        totalPages: Math.ceil(count / limit),
+      },
+      error: [],
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listApplications"));
+    res.status(500).json({ result: false, content: [], error: ["Error al obtener solicitudes"] });
+  }
+};
 
   // Descargar el PDF almacenado
   static downloadPdf = async (req: Request, res: Response) => {
