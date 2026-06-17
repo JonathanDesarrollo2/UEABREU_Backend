@@ -178,4 +178,67 @@ static async diagnosticText(req: Request, res: Response) {
     res.status(500).json({ result: false, content: [], error: [error.message] });
   }
 }
+static async getApplicationData(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const application = await RegistrationApplication.findByPk(id, {
+      include: [
+        {
+          model: Representative,
+          include: [{ model: Student, as: 'students' }]
+        },
+        { model: UserLogin }
+      ]
+    });
+
+    if (!application) {
+      res.status(404).json({ result: false, content: [], error: ["Solicitud no encontrada"] });
+      return;
+    }
+
+    const rep = application.representative;
+    if (!rep) {
+      res.status(404).json({ result: false, content: [], error: ["Representante no encontrado"] });
+      return;
+    }
+
+    const data = {
+      representativeFullName: rep.fullName,
+      representativeIdentityCard: rep.identityCard,
+      representativeAddress: rep.address,
+      representativePhone: rep.phone,
+      relationship: rep.relationship,
+      parentName: rep.parentName,
+      parentIdentityCard: rep.parentIdentityCard,
+      parentPhone: rep.parentPhone,
+      students: (rep.students || []).map(st => ({
+        fullName: st.fullName,
+        identityCard: st.identityCard,
+        birthDate: st.birthDate ? new Date(st.birthDate).toISOString().substring(0, 10) : '',
+        nationality: st.nationality,
+        birthCountry: st.birthCountry,
+        state: st.state,
+        zone: st.zone,
+        addressDescription: st.addressDescription,
+        phone: st.phone || '',
+        emergencyContact: st.emergencyContact,
+        emergencyPhone: st.emergencyPhone,
+        hasAllergies: st.hasAllergies,
+        allergiesDescription: st.allergiesDescription || '',
+        hasDiseases: st.hasDiseases,
+        diseasesDescription: st.diseasesDescription || '',
+        previousSchool: st.previousSchool || '',
+        municipality: st.municipality || '',
+        aspiredGrade: st.currentGrade || 'En asignar',
+      })),
+      email: application.user?.usermail || '',
+      planillaNumber: application.planillaNumber,
+    };
+
+    res.status(200).json({ result: true, content: data, error: [] });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getApplicationData"));
+    res.status(500).json({ result: false, content: [], error: ["Error al obtener datos de la solicitud"] });
+  }
+}
 }
