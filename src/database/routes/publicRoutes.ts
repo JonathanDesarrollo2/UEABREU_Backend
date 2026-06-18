@@ -31,5 +31,6 @@ PublicRouter.post('/verify-email',
 );
 
 PublicRouter.get('/registration-status', PublicController.getRegistrationStatus);
-
+// En tu archivo de rutas públicas (ej: publicRouter.ts)
+PublicRouter.get('/next-planilla-number', PublicController.getNextPlanillaNumber);
 export default PublicRouter;

@@ -366,4 +366,21 @@ export class PublicController {
       });
     }
   };
+  // En PublicController
+static getNextPlanillaNumber = async (req: Request, res: Response) => {
+  try {
+    const [counter] = await PlanillaCounter.findOrCreate({
+      where: {},
+      defaults: { currentNumber: 1 },
+    });
+    res.status(200).json({
+      result: true,
+      content: { planillaNumber: counter.currentNumber },
+      error: [],
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getNextPlanillaNumber"));
+    res.status(500).json({ result: false, content: [], error: ['Error al obtener el número de planilla'] });
+  }
+};
 }
