@@ -1,3 +1,4 @@
+// src/database/models/student.ts
 import {
   Table, Column, Model, DataType, Default, PrimaryKey,
   IsUUID, AllowNull, Length, ForeignKey, BelongsTo, HasMany
@@ -20,7 +21,6 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.UUID })
   declare id?: string;
 
-  // Información Personal
   @AllowNull(false)
   @Length({ min: 3, max: 100 })
   @Column({ type: DataType.STRING(100) })
@@ -59,7 +59,6 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.STRING(15) })
   declare phone?: string;
 
-  // Información de Salud
   @AllowNull(false)
   @Default(false)
   @Column({ type: DataType.BOOLEAN })
@@ -78,7 +77,6 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.TEXT })
   declare diseasesDescription?: string;
 
-  // Contacto de Emergencia
   @AllowNull(false)
   @Column({ type: DataType.STRING(100) })
   declare emergencyContact?: string;
@@ -87,7 +85,6 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.STRING(15) })
   declare emergencyPhone?: string;
 
-  // Información Académica
   @AllowNull(true)
   @Column({ type: DataType.DATE })
   declare admissionDate?: Date;
@@ -111,7 +108,6 @@ export default class Student extends Model<typestudent_full> {
   })
   declare status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo';
 
-  // 💰 Balance individual del estudiante
   @AllowNull(false)
   @Default(0.00)
   @Column({ 
@@ -123,7 +119,18 @@ export default class Student extends Model<typestudent_full> {
   })
   declare balance?: number;
 
-  // ========== NUEVOS CAMPOS ==========
+  // --- NUEVOS CAMPOS ---
+  @AllowNull(false)
+  @Default(0)
+  @Column({ type: DataType.DECIMAL(5, 2) })
+  declare exonerationPercent?: number;
+
+  @AllowNull(false)
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare hasPaidInscription?: boolean;
+  // --- FIN NUEVOS CAMPOS ---
+
   @AllowNull(true)
   @Column({ type: DataType.STRING(150) })
   declare previousSchool?: string;
@@ -131,9 +138,7 @@ export default class Student extends Model<typestudent_full> {
   @AllowNull(true)
   @Column({ type: DataType.STRING(100) })
   declare municipality?: string;
-  // ===================================
 
-  // Relaciones
   @ForeignKey(() => Representative)
   @AllowNull(false)
   @Column({ type: DataType.UUID })

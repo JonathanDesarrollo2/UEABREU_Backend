@@ -1082,4 +1082,21 @@ static adduser = async (req: Request, res: Response) => {
         }
     };
     //#endregion
+    // En src/controllers/UserController.ts
+static updateExoneration = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { exonerationPercent } = req.body;
+    const student = await Student.findByPk(id);
+    if (!student) {
+      return res.status(404).json({ result: false, error: ['Estudiante no encontrado'] });
+    }
+    student.exonerationPercent = exonerationPercent;
+    await student.save();
+    res.json({ result: true, content: [`Exoneración actualizada a ${exonerationPercent}%`], error: [] });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("updateExoneration"));
+    res.status(500).json({ result: false, content: [], error: ['Error al actualizar exoneración'] });
+  }
+};
 }

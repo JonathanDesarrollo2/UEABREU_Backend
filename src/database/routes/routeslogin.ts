@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { body, query } from "express-validator"; 
+import { body, param, query } from "express-validator"; 
 import { validateRoutes } from "../../middleware/validateRoutes";
 import { User } from "../../controllers/UserController"; // Ajusta la ruta según tu estructura
 import { loginLimiter } from "../../utility/loginLimiter";
@@ -165,5 +165,11 @@ RouterUser.get('/user-statistics',
     authsession,
     User.getUserStatistics
 );
-
+RouterUser.put('/students/:id/exoneration',
+  authsession,
+  param('id').isUUID().withMessage('ID inválido'),
+  body('exonerationPercent').isFloat({ min: 0, max: 100 }).withMessage('Porcentaje entre 0 y 100'),
+  validateRoutes,
+  User.updateExoneration
+);
 export default RouterUser;

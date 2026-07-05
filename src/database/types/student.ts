@@ -30,10 +30,11 @@ export interface typestudent_full {
     userId?: string;
     createdAt?: Date;
     updatedAt?: Date;
-    // 💰 NUEVO CAMPO
     balance?: number;
     previousSchool?: string;
     municipality?: string;
+    exonerationPercent?: number;
+    hasPaidInscription?: boolean;
 }
 
 export interface typestudent_create {
