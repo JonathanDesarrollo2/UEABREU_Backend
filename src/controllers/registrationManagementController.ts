@@ -11,25 +11,21 @@ import { Op } from "sequelize";
 
 export class RegistrationManagementController {
 
-  // Listar todas las solicitudes de inscripción
- static listApplications = async (req: Request, res: Response) => {
+static listApplications = async (req: Request, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const search = (req.query.search as string) || '';
+    const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'ASC' : 'DESC';
     const offset = (page - 1) * limit;
 
     const where: any = {};
     if (search) {
-      const orConditions: any[] = [
+      where[Op.or] = [
         { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
         { '$user.usermail$': { [Op.iLike]: `%${search}%` } },
-      ];
-      // Si el texto es un número, también buscamos por planillaNumber
-      if (!isNaN(Number(search))) {
-        orConditions.push({ planillaNumber: Number(search) });
-      }
-      where[Op.or] = orConditions;
+        { planillaNumber: isNaN(Number(search)) ? undefined : Number(search) },
+      ].filter(Boolean);
     }
 
     const { count, rows: applications } = await RegistrationApplication.findAndCountAll({
@@ -45,10 +41,10 @@ export class RegistrationManagementController {
           attributes: ["fullName"],
         },
       ],
-      order: [["createdAt", "DESC"]],
+      order: [["createdAt", sortOrder]],   // 👈 dinámico
       limit,
       offset,
-      distinct: true, // importante cuando hay includes
+      distinct: true,
     });
 
     const result = applications.map((app) => ({
