@@ -21,11 +21,15 @@ static listApplications = async (req: Request, res: Response) => {
 
     const where: any = {};
     if (search) {
-      where[Op.or] = [
+      const orConditions: any[] = [
         { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
         { '$user.usermail$': { [Op.iLike]: `%${search}%` } },
-        { planillaNumber: isNaN(Number(search)) ? undefined : Number(search) },
-      ].filter(Boolean);
+      ];
+      // Si el texto es un número, también buscamos por planillaNumber
+      if (!isNaN(Number(search))) {
+        orConditions.push({ planillaNumber: Number(search) });
+      }
+      where[Op.or] = orConditions;
     }
 
     const { count, rows: applications } = await RegistrationApplication.findAndCountAll({
@@ -41,7 +45,7 @@ static listApplications = async (req: Request, res: Response) => {
           attributes: ["fullName"],
         },
       ],
-      order: [["createdAt", sortOrder]],   // 👈 dinámico
+      order: [["createdAt", sortOrder]],
       limit,
       offset,
       distinct: true,
