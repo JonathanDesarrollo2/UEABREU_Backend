@@ -8,6 +8,7 @@ const pdfParse = require('pdf-parse');
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import { Op } from "sequelize";
+import { BillingService } from "../services/billingServices";
 
 export class RegistrationManagementController {
 
@@ -101,45 +102,51 @@ static listApplications = async (req: Request, res: Response) => {
   }
 };
 
-  // Activar cuenta (admitir solicitud)
-  static activateApplication = async (req: Request, res: Response) => {
-    const transaction = await sequelize.transaction();
-    try {
-      const { id } = req.params;
-      const application = await RegistrationApplication.findByPk(id, {
-        include: [UserLogin],
-        transaction,
-      });
+static activateApplication = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const application = await RegistrationApplication.findByPk(id, {
+      include: [UserLogin],
+      transaction,
+    });
 
-      if (!application || !application.user) {
-        await transaction.rollback();
-        res.status(404).json({ result: false, content: [], error: ["Solicitud no encontrada"] });
-        return;
-      }
-
-      // Activar el usuario
-      application.user.userstatus = true;
-      await application.user.save({ transaction });
-
-      // Opcional: Cambiar el estado de los estudiantes a 'regular'
-      await Student.update(
-        { status: "regular" },
-        { where: { userId: application.userId }, transaction }
-      );
-
-      await transaction.commit();
-
-      res.status(200).json({
-        result: true,
-        content: [`Cuenta activada correctamente. Planilla N° ${application.planillaNumber}`],
-        error: [],
-      });
-    } catch (error: any) {
+    if (!application || !application.user) {
       await transaction.rollback();
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("activateApplication"));
-      res.status(500).json({ result: false, content: [], error: ["Error al activar la cuenta"] });
+      res.status(404).json({ result: false, content: [], error: ["Solicitud no encontrada"] });
+      return;
     }
-  };
+
+    // Activar el usuario
+    application.user.userstatus = true;
+    await application.user.save({ transaction });
+
+    // Cambiar estado de todos los estudiantes del representante a 'regular'
+    await Student.update(
+      { status: "regular" },
+      { where: { userId: application.userId }, transaction }
+    );
+
+    // Aplicar cargos de inscripción a cada estudiante recién activado
+    const students = await Student.findAll({ where: { userId: application.userId }, transaction });
+    for (const student of students) {
+      const isNewStudent = !student.hasPaidInscription;
+      await BillingService.applyInscriptionFees(student.id!, application.representativeId!, isNewStudent);
+    }
+
+    await transaction.commit();
+
+    res.status(200).json({
+      result: true,
+      content: [`Cuenta activada correctamente. Planilla N° ${application.planillaNumber}`],
+      error: [],
+    });
+  } catch (error: any) {
+    await transaction.rollback();
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("activateApplication"));
+    res.status(500).json({ result: false, content: [], error: ["Error al activar la cuenta"] });
+  }
+};
 
   // Eliminar completamente el registro
   // Reemplaza el método deleteApplication en RegistrationManagementController.ts

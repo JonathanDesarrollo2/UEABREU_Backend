@@ -550,35 +550,27 @@ static manualDeposit = async (req: Request, res: Response) => {
     if (!amount || amount <= 0) {
       await transaction.rollback();
       return res.status(400).json({
-        result: false,
-        content: [],
-        error: ['El monto debe ser mayor a 0']
+        result: false, content: [], error: ['El monto debe ser mayor a 0']
       });
     }
 
-    // --- Verificar límite de 2 abonos mensuales ---
+    // Verificar límite de 2 abonos mensuales
     const limitReached = await BillingService.checkMonthlyDepositLimit(id);
     if (limitReached) {
       await transaction.rollback();
       return res.status(400).json({
-        result: false,
-        content: [],
-        error: ['Ya ha alcanzado el máximo de 2 abonos este mes.']
+        result: false, content: [], error: ['Ya ha alcanzado el máximo de 2 abonos este mes.']
       });
     }
-    // -----------------------------------------------
 
     if (reference) {
       const existingTransaction = await Transaction.findOne({
-        where: { reference },
-        transaction
+        where: { reference }, transaction
       });
       if (existingTransaction) {
         await transaction.rollback();
         return res.status(409).json({
-          result: false,
-          content: [],
-          error: [`La referencia "${reference}" ya fue utilizada en otra transacción.`]
+          result: false, content: [], error: [`La referencia "${reference}" ya fue utilizada en otra transacción.`]
         });
       }
     }
@@ -590,9 +582,7 @@ static manualDeposit = async (req: Request, res: Response) => {
     if (!representative) {
       await transaction.rollback();
       return res.status(404).json({
-        result: false,
-        content: [],
-        error: ['Representante no encontrado']
+        result: false, content: [], error: ['Representante no encontrado']
       });
     }
 
@@ -610,17 +600,18 @@ static manualDeposit = async (req: Request, res: Response) => {
 
     if (studentId) {
       const student = await Student.findOne({
-        where: { id: studentId, representativeId: id },
-        transaction
+        where: { id: studentId, representativeId: id }, transaction
       });
       if (!student) {
         await transaction.rollback();
         return res.status(400).json({
-          result: false,
-          content: [],
-          error: ['Estudiante no encontrado o no pertenece al representante']
+          result: false, content: [], error: ['Estudiante no encontrado o no pertenece al representante']
         });
       }
+
+      // Aplicar pronto pago ANTES de procesar el depósito
+      await BillingService.applyEarlyPaymentDiscount(studentId, id);
+
       const newBalance = (student.balance || 0) + amount;
       await student.update({ balance: newBalance }, { transaction });
       targetStudentId = student.id!;
@@ -628,6 +619,7 @@ static manualDeposit = async (req: Request, res: Response) => {
       const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
       newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
     } else {
+      // No se especifica estudiante, se distribuye el monto entre todos (no se aplica pronto pago)
       updatedStudentIds = await this.distributeAmountAmongStudents(id, amount, transaction);
       const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
       newTotalBalance = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
@@ -665,9 +657,7 @@ static manualDeposit = async (req: Request, res: Response) => {
     await transaction.rollback();
     ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
     res.status(500).json({
-      result: false,
-      content: [],
-      error: [`Error al realizar depósito: ${error.message}`]
+      result: false, content: [], error: [`Error al realizar depósito: ${error.message}`]
     });
   }
 };
