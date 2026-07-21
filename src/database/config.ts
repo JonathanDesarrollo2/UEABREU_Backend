@@ -57,8 +57,9 @@ if (NODE_ENV === 'production') {
       StudentSchedule,
       BlockTimeConfig,
       Setting,
-      PlanillaCounter,        // ⭐ NUEVO
-      RegistrationApplication // ⭐ NUEVO
+      PlanillaCounter,        
+      RegistrationApplication, 
+      SchoolFee
     ],
     logging: console.log,
     pool: {
