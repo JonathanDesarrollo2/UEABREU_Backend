@@ -17,6 +17,7 @@ import Setting from "./models/settings";
 // ⭐ NUEVOS MODELOS ⭐
 import PlanillaCounter from "./models/PlanillaCounter";
 import RegistrationApplication from "./models/RegistrationAplicattion"; // Ajusta el nombre si es "RegistrationApplication"
+import SchoolFee from "./models/ScoolFee";
 
 dotenv.config();
 
@@ -87,8 +88,9 @@ if (NODE_ENV === 'production') {
       StudentSchedule,
       BlockTimeConfig,
       Setting,
-      PlanillaCounter,        // ⭐ NUEVO
-      RegistrationApplication // ⭐ NUEVO
+      PlanillaCounter,        
+      RegistrationApplication, 
+      SchoolFee
     ],
     logging: console.log,
     pool: {

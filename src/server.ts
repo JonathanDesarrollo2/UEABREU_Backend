@@ -16,6 +16,7 @@ import routerBlockTime from "./database/routes/blockTimeRoutes";
 import PublicRouter from "./database/routes/publicRoutes";
 import SettingsRouter from "./database/routes/settingsRoutes";
 import RegistrationManagementRouter from "./database/routes/registrationManagementRoutes";
+import FeeRoutes from "./database/routes/FeeRoutes";
 
 dotenv.config();
 //#endregion
@@ -64,6 +65,7 @@ server.use('/api/private/academic', AcademicRouter);
 server.use('/api/private/balance', BalanceRoutes);
 server.use('/api/private/block', routerBlockTime);
 server.use('/api/private/registrations', RegistrationManagementRouter);
+server.use('/api/private/fees', FeeRoutes);
 
 // ⭐ NUEVO: Rutas administrativas para settings (activar/desactivar inscripciones)
 server.use('/api/private/settings', SettingsRouter);

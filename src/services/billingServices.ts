@@ -8,8 +8,8 @@ import Transaction, {
 } from "../database/models/transaction";
 import sequelize from "../database/config";
 import { Op } from "sequelize";
-import { currentSchoolFees } from "../config/fee-config";
 import { BankAPI } from "../bank/bank-api";
+import SchoolFee from "../database/models/ScoolFee";
 
 export class BillingService {
   /**
@@ -28,12 +28,35 @@ export class BillingService {
   }
 
   /**
+   * Obtiene (o crea) la configuración de tarifas para el año escolar activo.
+   */
+  private static async getSchoolFees(): Promise<SchoolFee> {
+    let fee = await SchoolFee.findOne({ where: { schoolYear: '2026-2027' } });
+    if (!fee) {
+      fee = await SchoolFee.create({
+        schoolYear: '2026-2027',
+        inscriptionFeeUSD: 80,
+        monthlyFeeUSD: 100,
+        prontoPagoDiscount: 10,
+        prontoPagoDeadlineDay: 10,
+        administrativeFeeUSD: 20,
+        august2027HalfPaymentUSD: 45,
+        monthlyFeeStartDate: '2026-09-01',
+        inscriptionStartDate: '2026-07-15',
+        inscriptionEndDate: '2026-10-01',
+      });
+    }
+    return fee;
+  }
+
+  /**
    * Aplica la mensualidad a todos los estudiantes regulares el día 1 de cada mes.
    * Los montos en USD se convierten a Bs usando la tasa BCV del día.
    */
   static async applyMonthlyFee() {
     const today = new Date();
-    const startDate = new Date(currentSchoolFees.monthlyFeeStartDate);
+    const fees = await this.getSchoolFees();
+    const startDate = new Date(fees.monthlyFeeStartDate!);
     if (today < startDate) return;
 
     const year = today.getFullYear();
@@ -47,17 +70,15 @@ export class BillingService {
     console.log(`💱 Tasa BCV para mensualidades: ${bcvRate} Bs/USD`);
 
     const students = await Student.findAll({
-      where: { status: "regular" },
+      where: { status: 'regular' },
     });
 
     for (const student of students) {
       const exoneration = student.exonerationPercent || 0;
-      // Monto en USD después de exoneración
-      let feeUSD = currentSchoolFees.monthlyFeeUSD * (1 - exoneration / 100);
+      let feeUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
       feeUSD = Math.round(feeUSD * 100) / 100;
       if (feeUSD <= 0) continue;
 
-      // Convertir a Bs
       const feeBS = Math.round(feeUSD * bcvRate * 100) / 100;
 
       // Evitar duplicados en el mismo mes
@@ -68,12 +89,13 @@ export class BillingService {
           description: `Mensualidad ${monthNames[month]} ${year}`,
           createdAt: {
             [Op.gte]: new Date(year, month, 1),
-            [Op.lt]: new Date(year, month + 1, 1),
-          },
-        },
+            [Op.lt]: new Date(year, month + 1, 1)
+          }
+        }
       });
       if (existing) continue;
 
+      // Crear la transacción de cargo
       await Transaction.create({
         studentId: student.id,
         representativeId: student.representativeId!,
@@ -93,7 +115,6 @@ export class BillingService {
   /**
    * Aplica las cuotas únicas al activar un estudiante (inscripción, gasto administrativo,
    * anticipo agosto 2027) y, si ya comenzaron las mensualidades, la del mes en curso.
-   * Todos los montos se convierten a Bs usando la tasa BCV del día.
    */
   static async applyInscriptionFees(
     studentId: string,
@@ -103,6 +124,7 @@ export class BillingService {
     const student = await Student.findByPk(studentId);
     if (!student) return;
 
+    const fees = await this.getSchoolFees();
     const bcvRate = await this.getCurrentBCVRate();
     console.log(`💱 Tasa BCV para inscripción: ${bcvRate} Bs/USD`);
 
@@ -112,70 +134,58 @@ export class BillingService {
 
       // Inscripción (solo si no se ha cobrado antes)
       if (!student.hasPaidInscription) {
-        const inscriptionUSD = currentSchoolFees.inscriptionFeeUSD;
-        const inscriptionBS = Math.round(inscriptionUSD * bcvRate * 100) / 100;
-        await Transaction.create(
-          {
-            studentId: student.id,
-            representativeId,
-            type: TransactionType.FEE,
-            amount: inscriptionBS,
-            description: "Inscripción año escolar 2026-2027",
-            paymentMethod: PaymentMethod.CASH,
-            status: TransactionStatus.COMPLETED,
-            balanceBefore: currentBalance,
-            balanceAfter: currentBalance - inscriptionBS,
-          },
-          { transaction: t }
-        );
+        const inscriptionBS = Math.round(fees.inscriptionFeeUSD! * bcvRate * 100) / 100;
+        await Transaction.create({
+          studentId: student.id,
+          representativeId,
+          type: TransactionType.FEE,
+          amount: inscriptionBS,
+          description: "Inscripción año escolar 2026-2027",
+          paymentMethod: PaymentMethod.CASH,
+          status: TransactionStatus.COMPLETED,
+          balanceBefore: currentBalance,
+          balanceAfter: currentBalance - inscriptionBS,
+        }, { transaction: t });
         currentBalance -= inscriptionBS;
       }
 
       // Gasto administrativo (solo nuevos ingresos)
       if (isNewStudent && !student.hasPaidInscription) {
-        const adminUSD = currentSchoolFees.administrativeFeeUSD;
-        const adminBS = Math.round(adminUSD * bcvRate * 100) / 100;
-        await Transaction.create(
-          {
-            studentId: student.id,
-            representativeId,
-            type: TransactionType.FEE,
-            amount: adminBS,
-            description: "Gasto administrativo (nuevo ingreso)",
-            paymentMethod: PaymentMethod.CASH,
-            status: TransactionStatus.COMPLETED,
-            balanceBefore: currentBalance,
-            balanceAfter: currentBalance - adminBS,
-          },
-          { transaction: t }
-        );
+        const adminBS = Math.round(fees.administrativeFeeUSD! * bcvRate * 100) / 100;
+        await Transaction.create({
+          studentId: student.id,
+          representativeId,
+          type: TransactionType.FEE,
+          amount: adminBS,
+          description: "Gasto administrativo (nuevo ingreso)",
+          paymentMethod: PaymentMethod.CASH,
+          status: TransactionStatus.COMPLETED,
+          balanceBefore: currentBalance,
+          balanceAfter: currentBalance - adminBS,
+        }, { transaction: t });
         currentBalance -= adminBS;
       }
 
       // Anticipo 50% mensualidad agosto 2027 (si no se ha cobrado)
       if (!student.hasPaidInscription) {
-        const halfUSD = currentSchoolFees.august2027HalfPaymentUSD;
-        const halfBS = Math.round(halfUSD * bcvRate * 100) / 100;
-        await Transaction.create(
-          {
-            studentId: student.id,
-            representativeId,
-            type: TransactionType.FEE,
-            amount: halfBS,
-            description: "Anticipo 50% mensualidad Agosto 2027",
-            paymentMethod: PaymentMethod.CASH,
-            status: TransactionStatus.COMPLETED,
-            balanceBefore: currentBalance,
-            balanceAfter: currentBalance - halfBS,
-          },
-          { transaction: t }
-        );
+        const halfBS = Math.round(fees.august2027HalfPaymentUSD! * bcvRate * 100) / 100;
+        await Transaction.create({
+          studentId: student.id,
+          representativeId,
+          type: TransactionType.FEE,
+          amount: halfBS,
+          description: "Anticipo 50% mensualidad Agosto 2027",
+          paymentMethod: PaymentMethod.CASH,
+          status: TransactionStatus.COMPLETED,
+          balanceBefore: currentBalance,
+          balanceAfter: currentBalance - halfBS,
+        }, { transaction: t });
         currentBalance -= halfBS;
       }
 
       // Mensualidad del mes en curso si ya comenzaron las mensualidades
       const today = new Date();
-      const monthlyStart = new Date(currentSchoolFees.monthlyFeeStartDate);
+      const monthlyStart = new Date(fees.monthlyFeeStartDate!);
       if (today >= monthlyStart) {
         const year = today.getFullYear();
         const month = today.getMonth();
@@ -190,43 +200,36 @@ export class BillingService {
             description: `Mensualidad ${monthNames[month]} ${year}`,
             createdAt: {
               [Op.gte]: new Date(year, month, 1),
-              [Op.lt]: new Date(year, month + 1, 1),
-            },
+              [Op.lt]: new Date(year, month + 1, 1)
+            }
           },
           transaction: t,
         });
         if (!existingMonthly) {
           const exoneration = student.exonerationPercent || 0;
-          let monthlyUSD =
-            currentSchoolFees.monthlyFeeUSD * (1 - exoneration / 100);
+          let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
           monthlyUSD = Math.round(monthlyUSD * 100) / 100;
           const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
-          await Transaction.create(
-            {
-              studentId: student.id,
-              representativeId,
-              type: TransactionType.FEE,
-              amount: monthlyBS,
-              description: `Mensualidad ${monthNames[month]} ${year}`,
-              paymentMethod: PaymentMethod.CASH,
-              status: TransactionStatus.COMPLETED,
-              balanceBefore: currentBalance,
-              balanceAfter: currentBalance - monthlyBS,
-            },
-            { transaction: t }
-          );
+          await Transaction.create({
+            studentId: student.id,
+            representativeId,
+            type: TransactionType.FEE,
+            amount: monthlyBS,
+            description: `Mensualidad ${monthNames[month]} ${year}`,
+            paymentMethod: PaymentMethod.CASH,
+            status: TransactionStatus.COMPLETED,
+            balanceBefore: currentBalance,
+            balanceAfter: currentBalance - monthlyBS,
+          }, { transaction: t });
           currentBalance -= monthlyBS;
         }
       }
 
       // Marcar que la inscripción ya fue pagada
-      await student.update(
-        {
-          balance: currentBalance,
-          hasPaidInscription: true,
-        },
-        { transaction: t }
-      );
+      await student.update({
+        balance: currentBalance,
+        hasPaidInscription: true,
+      }, { transaction: t });
 
       await t.commit();
     } catch (error) {
@@ -238,9 +241,7 @@ export class BillingService {
   /**
    * Verifica si un representante ya alcanzó el máximo de 2 depósitos en el mes actual.
    */
-  static async checkMonthlyDepositLimit(
-    representativeId: string
-  ): Promise<boolean> {
+  static async checkMonthlyDepositLimit(representativeId: string): Promise<boolean> {
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -250,10 +251,8 @@ export class BillingService {
         representativeId,
         type: TransactionType.DEPOSIT,
         status: TransactionStatus.COMPLETED,
-        createdAt: {
-          [Op.between]: [firstDay, lastDay],
-        },
-      },
+        createdAt: { [Op.between]: [firstDay, lastDay] }
+      }
     });
 
     return count >= 2;
@@ -263,12 +262,10 @@ export class BillingService {
    * Aplica descuento por pronto pago si corresponde.
    * Se llama después de registrar un depósito (pago) para un estudiante.
    */
-  static async applyEarlyPaymentDiscount(
-    studentId: string,
-    representativeId: string
-  ) {
+  static async applyEarlyPaymentDiscount(studentId: string, representativeId: string) {
     const today = new Date();
-    if (today.getDate() > currentSchoolFees.prontoPagoDeadlineDay) return; // solo hasta el día 10
+    const fees = await this.getSchoolFees();
+    if (today.getDate() > fees.prontoPagoDeadlineDay!) return;
 
     const year = today.getFullYear();
     const month = today.getMonth();
@@ -285,18 +282,14 @@ export class BillingService {
         description: `Mensualidad ${monthNames[month]} ${year}`,
         createdAt: {
           [Op.gte]: new Date(year, month, 1),
-          [Op.lt]: new Date(year, month + 1, 1),
-        },
-      },
+          [Op.lt]: new Date(year, month + 1, 1)
+        }
+      }
     });
 
     if (existingFee) {
-      // El monto de la mensualidad original ya está en Bs, pero para el descuento
-      // debemos usar el valor en USD convertido a Bs con la tasa del día.
       const bcvRate = await this.getCurrentBCVRate();
-      const discountUSD = currentSchoolFees.prontoPagoDiscount; // $10
-      const discountBS = Math.round(discountUSD * bcvRate * 100) / 100;
-
+      const discountBS = Math.round(fees.prontoPagoDiscount! * bcvRate * 100) / 100;
       const student = await Student.findByPk(studentId);
       if (!student) return;
 
