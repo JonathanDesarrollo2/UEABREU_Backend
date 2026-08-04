@@ -3,21 +3,21 @@ steps:
     args:
       - 'build'
       - '-f'
-      - 'Dockerfile'
+      - 'Dockerfile'                          # ← coincide con tu archivo real
       - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:${_IMAGE_TAG}'
       - '.'
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:${_IMAGE_TAG}'
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - 'run'
       - 'deploy'
-      - 'ueabreu-backend'
+      - '${_SERVICE_NAME}'
       - '--image'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:${_IMAGE_TAG}'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -26,6 +26,6 @@ steps:
       - '--port'
       - '8080'
       - '--set-env-vars'
-      - 'FRONTEND_URL1=https://ueabreu.com,FRONTEND_URL2=https://www.ueabreu.com,FRONTEND_URL3=http://localhost:5173,BACKEND_URL=http://localhost:8080,BACKEND_URL1=https://api.ueabreu.com,SESION_SECRETKEY=SesionesUEABREU,JWT_EXPIRES_IN=1h,NODE_ENV=production,DB_HOST=dpg-d5sid6vgi27c73cb8540-a.oregon-postgres.render.com,DB_PORT=5432,DB_USER=ueabreu,DB_PASSWORD=L8fersYggb6iamcKjYTkfZzEyyRuGyuq,DB_NAME=ueabreudb_bphm,BNC_CLIENT_GUID=4A074C46-DD4E-4E54-8010-B80A6A8758F4,BNC_MASTER_KEY=328bf099102990d926f3499379594204,BNC_BASE_URL=https://servicios.bncenlinea.com:16500/api,BNC_TEST_MODE=true,EMAIL_HOST=smtp.gmail.com,EMAIL_PORT=465,EMAIL_USER=uejantonioabreu@gmail.com,EMAIL_PASS=tmty qsju btpn znkr,EMAIL_FROM=U.E. Antonio Abreu <uejantonioabreu@gmail.com>'
+      - '${_BACKEND_ENV_VARS}'
 options:
   logging: CLOUD_LOGGING_ONLY
