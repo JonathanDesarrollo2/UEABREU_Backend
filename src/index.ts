@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { connectToDatabase } from "./database/config";
 import { ErrorLog } from "./utility/ErrorLog";
 import { getErrorLocation } from "./utility/callerinfo";
+import { startDebtScheduler } from "./cron/DebtProcessor";
 
 dotenv.config();
 const port = process.env.PORT || 8080;
@@ -63,10 +64,10 @@ async function startServer() {
     }
 
     server.listen(port, () => {
-      console.log(colors.blue.bold(`🚀 Servidor Académico Conectado en puerto ${port}`));
-      console.log(colors.green.bold(`📚 Entorno: ${process.env.NODE_ENV || 'development'}`));
-      console.log(colors.cyan.bold(`🔗 Health Check: http://localhost:${port}/api/`));
     });
+    if (dbConnected) {
+      startDebtScheduler();
+    }
 
   } catch (error: any) {
     console.log(colors.red.bold(`💥 Error al iniciar servidor: ${error.message}`));

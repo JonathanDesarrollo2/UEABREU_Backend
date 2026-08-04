@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { body, query } from "express-validator"; 
+import { body, param, query } from "express-validator"; 
 import { validateRoutes } from "../../middleware/validateRoutes";
 import { User } from "../../controllers/UserController"; // Ajusta la ruta según tu estructura
 import { loginLimiter } from "../../utility/loginLimiter";
@@ -9,7 +9,6 @@ const RouterUser = Router();
 
 // Crear usuario
 RouterUser.post('/adduser' 
-
     ,body('usermail')
         .notEmpty().withMessage('Es requerido ingresar el email del Usuario')
         .isEmail().withMessage('Es requerido ingresar un Email Valido')
@@ -29,10 +28,6 @@ RouterUser.post('/adduser'
     ,body('nivel')
         .optional()
         .isInt({ min: 1 }).withMessage('El nivel debe ser un número entero mayor a 0')
-    ,User.CheckEmailExists
-    ,User.CheckUserIDExists
-    ,User.ComparePass
-    ,validateRoutes
     ,User.adduser
 );
 
@@ -54,6 +49,10 @@ RouterUser.get('/listpag',
     query('DeBus')
         .optional()
         .isString().withMessage('El parámetro de búsqueda debe ser un texto'),
+    query('nivelFilter')
+        .optional()
+        .isString().withMessage('El filtro de nivel debe ser un texto')
+        .isIn(['all', '1', '2']).withMessage('El filtro de nivel debe ser: all, 1 o 2'),
     validateRoutes,
     User.getPaginatedlogin
 );
@@ -99,13 +98,13 @@ RouterUser.post('/updatelogin',
 
 // Iniciar sesión
 RouterUser.post('/privateauth',
-    loginLimiter,
+    //loginLimiter,
     body('usermail')
         .notEmpty().withMessage('Es requerido ingresar el correo del usuario')
         .isEmail().withMessage('Debe ser un email válido'),
     body('userpass')
         .notEmpty().withMessage('Es requerido ingresar la contraseña'),
-    validateRoutes,
+    //validateRoutes,
     User.SesionIn
 );
 
@@ -121,4 +120,56 @@ RouterUser.get('/statistics'
     , User.getStatistics
 );
 
+// Agregar estudiante a representante existente
+RouterUser.post('/add-student',
+    authsession,
+    body('representativeId')
+        .notEmpty().withMessage('ID del representante requerido')
+        .isUUID().withMessage('ID inválido'),
+    body('studentData.fullName')
+        .notEmpty().withMessage('Nombre del estudiante requerido'),
+    body('studentData.identityCard')
+        .notEmpty().withMessage('Cédula del estudiante requerida'),
+    body('studentData.birthDate')
+        .notEmpty().withMessage('Fecha de nacimiento requerida'),
+    validateRoutes,
+    User.addStudentToRepresentative
+);
+
+// Eliminar estudiante
+RouterUser.post('/remove-student',
+    authsession,
+    body('studentId')
+        .notEmpty().withMessage('ID del estudiante requerido')
+        .isUUID().withMessage('ID inválido'),
+    body('representativeId')
+        .notEmpty().withMessage('ID del representante requerido')
+        .isUUID().withMessage('ID inválido'),
+    validateRoutes,
+    User.removeStudent
+);
+
+// Lista de estudiantes - RUTA NUEVA AGREGADA
+RouterUser.get('/students/list',
+    authsession,
+    query('page').optional().isNumeric().toInt(),
+    query('limit').optional().isNumeric().toInt(),
+    query('status').optional().isString(),
+    query('search').optional().isString(),
+    validateRoutes,
+    User.listStudents
+);
+
+// Estadísticas de usuarios (para dashboard)
+RouterUser.get('/user-statistics',
+    authsession,
+    User.getUserStatistics
+);
+RouterUser.put('/students/:id/exoneration',
+  authsession,
+  param('id').isUUID().withMessage('ID inválido'),
+  body('exonerationPercent').isFloat({ min: 0, max: 100 }).withMessage('Porcentaje entre 0 y 100'),
+  validateRoutes,
+  User.updateExoneration
+);
 export default RouterUser;

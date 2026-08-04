@@ -5,6 +5,7 @@ import {
 import { typeuserlogin_full } from "../types/userlogin";
 import Student from "./student";
 import bcrypt from 'bcrypt';
+import Representative from "./representative";
 
 @Table({
   tableName: 'userlogin',
@@ -30,6 +31,21 @@ export default class UserLogin extends Model<typeuserlogin_full> {
   })
   declare usermail?: string;
 
+  @AllowNull(true)
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare emailVerified?: boolean;
+
+  @AllowNull(true)
+  @Default(null)
+  @Column({ type: DataType.STRING(10) })
+  declare verificationCode?: string | null;   // <--- añadir | null
+
+  @AllowNull(true)
+  @Default(null)
+  @Column({ type: DataType.DATE })
+  declare verificationCodeExpires?: Date | null;  // <--- añadir | null
+  
   @AllowNull(false)
   @Length({ min: 4, max: 100 })
   @Column({ type: DataType.STRING(100) })
@@ -97,4 +113,11 @@ export default class UserLogin extends Model<typeuserlogin_full> {
   // Relación con estudiantes
   @HasOne(() => Student)
   declare student?: Student;
+
+  @HasOne(() => Representative, {
+  foreignKey: 'userId',       // Campo en la tabla Representative
+  as: 'representative',       // Nombre de la relación
+  constraints: false          // IMPORTANTE: Permite que no todos los UserLogin tengan Representative
+})
+declare representative?: Representative;
 }

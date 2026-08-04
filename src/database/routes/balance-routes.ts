@@ -5,6 +5,7 @@ import { validateRoutes } from "../../middleware/validateRoutes";
 import { BalanceController } from "../../controllers/balance-controller";
 import { authsession } from "../../utility/authsession";
 import { PaymentMethod, TransactionType, TransactionStatus } from "../../database/models/transaction";
+import { User } from "../../controllers/UserController";
 
 const router = Router();
 
@@ -79,6 +80,7 @@ router.post('/representative/:id/deposit',
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
   body('createdBy').optional().isUUID(),
+  body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
   BalanceController.manualDeposit
 );
@@ -94,6 +96,7 @@ router.post('/representative/:id/withdraw',
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
   body('createdBy').optional().isUUID(),
+  body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
   BalanceController.manualWithdrawal
 );
@@ -105,6 +108,11 @@ router.get('/check-payment',
   query('representativeId').notEmpty().withMessage('El ID del representante es requerido'),
   validateRoutes,
   BalanceController.checkPaymentExists
+);
+
+router.get('/statistics',
+  authsession,
+  User.getUserStatistics
 );
 
 router.get('/transaction-status',
@@ -123,4 +131,31 @@ router.get('/statistics/financial',
   BalanceController.getFinancialStatistics
 );
 
+// Transacciones recientes (para dashboard)
+router.get('/transactions/recent', 
+  authsession,
+  query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
+  validateRoutes,
+  BalanceController.getRecentTransactions
+);
+router.get('/representative-by-email', 
+  BalanceController.getRepresentativeByEmail);
+
+  // src/routes/balance-routes.ts
+router.get('/transactions',
+  authsession,
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  query('representativeId').optional().isUUID(),
+  query('studentId').optional().isUUID(),
+  query('type').optional().isIn(['deposit', 'withdrawal', 'payment', 'fee', 'adjustment']),
+  query('status').optional().isIn(['pending', 'completed', 'cancelled', 'failed', 'reversed']),
+  query('startDate').optional().isISO8601(),
+  query('endDate').optional().isISO8601(),
+  query('search').optional().isString(),
+  query('sortBy').optional().isIn(['createdAt', 'amount', 'type', 'student.fullName']),
+  query('sortOrder').optional().isIn(['asc', 'desc']),
+  validateRoutes,
+  BalanceController.getAllTransactions
+);
 export default router;

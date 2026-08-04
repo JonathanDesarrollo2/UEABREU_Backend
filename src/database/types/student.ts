@@ -1,5 +1,6 @@
+// src/database/types/student.ts
 import { typeuserlogin_response } from "./userlogin";
-import { typerepresentative_response } from "./representative";
+import { typerepresentative_full } from "./representative";
 
 export type StudentStatus = 'regular' | 'repitiente' | 'condicionado';
 
@@ -7,17 +8,33 @@ export interface typestudent_full {
     id?: string;
     fullName?: string;
     identityCard?: string;
-    address?: string;
+    birthDate?: Date;
+    state?: string;
+    zone?: string;
+    addressDescription?: string;
     phone?: string;
+    nationality?: string;
+    birthCountry?: string;
+    hasAllergies?: boolean;
+    allergiesDescription?: string;
+    hasDiseases?: boolean;
+    diseasesDescription?: string;
+    emergencyContact?: string;
+    emergencyPhone?: string;
     admissionDate?: Date;
     initialSchoolYear?: string;
     currentGrade?: string;
     section?: string;
-    status?: StudentStatus;
+    status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo';
     representativeId?: string;
     userId?: string;
     createdAt?: Date;
     updatedAt?: Date;
+    balance?: number;
+    previousSchool?: string;
+    municipality?: string;
+    exonerationPercent?: number;
+    hasPaidInscription?: boolean;
 }
 
 export interface typestudent_create {
@@ -32,6 +49,7 @@ export interface typestudent_create {
     status?: StudentStatus;
     representativeId: string;
     userId?: string;
+    balance?: number; // opcional al crear
 }
 
 export interface typestudent_update {
@@ -47,6 +65,7 @@ export interface typestudent_update {
     status?: StudentStatus;
     representativeId?: string;
     userId?: string;
+    balance?: number; // opcional al actualizar
 }
 
 export interface typestudent_response {
@@ -64,8 +83,9 @@ export interface typestudent_response {
     userId?: string;
     createdAt: Date;
     updatedAt: Date;
-    representative?: typerepresentative_response;
+    representative?: typerepresentative_full;
     user?: typeuserlogin_response;
+    balance?: number; // incluir en respuesta
 }
 
 export interface typestudent_list {

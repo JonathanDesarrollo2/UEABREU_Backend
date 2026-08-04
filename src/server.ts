@@ -1,18 +1,22 @@
-// src/routes/index.ts
+// src/server.ts
 //#region: Importar
 import express from "express";  
-import colors from "colors";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { corsConfig } from "./config/cors";
 import { ErrorLog } from "./utility/ErrorLog";
 import { getErrorLocation } from "./utility/callerinfo";
-
 // Importar rutas
 import BankRoutes from "./bank/routes/bank-routes";
 import RouterUser from "./database/routes/routeslogin";
-// import NotificationRoutes from "../bank/routes/notification-routes"; // COMENTADO POR AHORA
+import AcademicRouter from "./database/routes/academic-routes";
+import BalanceRoutes from "./database/routes/balance-routes";
+import routerBlockTime from "./database/routes/blockTimeRoutes";
+import PublicRouter from "./database/routes/publicRoutes";
+import SettingsRouter from "./database/routes/settingsRoutes";
+import RegistrationManagementRouter from "./database/routes/registrationManagementRoutes";
+import FeeRoutes from "./database/routes/FeeRoutes";
 
 dotenv.config();
 //#endregion
@@ -46,16 +50,27 @@ server.use((req, res, next) => {
 //#endregion
 
 //#region: Rutas de la API
-// Rutas Públicas (sin autenticación)
+// Rutas Públicas existentes (login sin autenticación)
 server.use('/api/public/login', RouterUser);
 
-// 👇 RUTAS DEL BANCO (SOLO LAS ESENCIALES)
+// ⭐ NUEVO: Rutas públicas para registro y verificación de correo
+server.use('/api/public', PublicRouter);
+
+// Rutas del Banco
 server.use('/api/bank', BankRoutes);
 
-// Rutas Privadas (requieren autenticación)
+// Rutas Privadas (con autenticación)
 server.use('/api/private/user', RouterUser);
+server.use('/api/private/academic', AcademicRouter);
+server.use('/api/private/balance', BalanceRoutes);
+server.use('/api/private/block', routerBlockTime);
+server.use('/api/private/registrations', RegistrationManagementRouter);
+server.use('/api/private/fees', FeeRoutes);
 
-// Health Check y ruta raíz
+// ⭐ NUEVO: Rutas administrativas para settings (activar/desactivar inscripciones)
+server.use('/api/private/settings', SettingsRouter);
+
+// Health check actualizado
 server.get('/api/', (req, res) => {
     res.json({ 
         status: 'OK', 
@@ -64,16 +79,24 @@ server.get('/api/', (req, res) => {
         environment: process.env.NODE_ENV || 'development',
         services: {
             academic: 'Operational',
-            bank: 'Available at /api/bank'
+            bank: 'Available at /api/bank',
+            balance: 'Available at /api/private/balance',
+            user: 'Available at /api/private/user',
+            config: 'Available at /api/private/block',
+            auth: 'Available at /api/public/login',
+            publicRegister: 'Available at /api/public/register',
+            publicVerify: 'Available at /api/public/verify-email',
+            settings: 'Available at /api/private/settings'
         },
         endpoints: {
             health: '/api/',
-            bank_health: '/api/bank/health',
-            bank_welcome: '/api/bank/welcome',
-            bank_test: '/api/bank/test-connection',
-            bank_logon: '/api/bank/logon',
-            bank_validate: '/api/bank/validate-p2p',
-            cors_test: '/api/cors-test'
+            user_stats: '/api/private/user/statistics',
+            balance_stats: '/api/private/balance/statistics/financial',
+            teachers: '/api/private/academic/teacher/list',
+            students: '/api/private/user/students/list',
+            block_times: '/api/private/block/block-times',
+            toggle_registrations: '/api/private/settings/registrations/toggle',
+            registration_status: '/api/private/settings/registrations'
         }
     });
 });
@@ -92,9 +115,6 @@ server.get('/api/cors-test', (req, res) => {
 //#region: Manejo de Errores
 // Manejo de errores no capturados
 server.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error(colors.red.bold(`💥 Error no manejado: ${err.message}`));
-    console.error(err.stack);
-    
     ErrorLog.createErrorLog(
         err, 
         'system',
@@ -123,7 +143,13 @@ server.use('*', (req, res) => {
             root: '/',
             api: '/api/',
             bank: '/api/bank/*',
-            cors_test: '/api/cors-test'
+            balance: '/api/private/balance/*',
+            user: '/api/private/user/*',
+            academic: '/api/private/academic/*',
+            config: '/api/private/block/*',
+            cors_test: '/api/cors-test',
+            public: '/api/public/register, /api/public/verify-email',
+            settings: '/api/private/settings/registrations'
         }
     });
 });

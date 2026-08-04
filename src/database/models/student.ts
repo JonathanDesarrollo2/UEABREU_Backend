@@ -1,10 +1,12 @@
+// src/database/models/student.ts
 import {
   Table, Column, Model, DataType, Default, PrimaryKey,
-  IsUUID, AllowNull, Length, ForeignKey, BelongsTo
+  IsUUID, AllowNull, Length, ForeignKey, BelongsTo, HasMany
 } from "sequelize-typescript";
 import { typestudent_full } from "../types/student";
 import Representative from "./representative";
 import UserLogin from "./userlogin";
+import StudentSchedule from "./StudentSchedule";
 
 @Table({
   tableName: 'student',
@@ -19,50 +21,124 @@ export default class Student extends Model<typestudent_full> {
   @Column({ type: DataType.UUID })
   declare id?: string;
 
-  // Información Personal
   @AllowNull(false)
   @Length({ min: 3, max: 100 })
   @Column({ type: DataType.STRING(100) })
   declare fullName?: string;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Length({ min: 6, max: 20 })
   @Column({ type: DataType.STRING(20), unique: true })
   declare identityCard?: string;
 
-  @AllowNull(true)
-  @Column({ type: DataType.STRING(200) })
-  declare address?: string;
+  @AllowNull(false)
+  @Column({ type: DataType.DATE })
+  declare birthDate?: Date;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare nationality?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare birthCountry?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(50) })
+  declare state?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare zone?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.TEXT })
+  declare addressDescription?: string;
 
   @AllowNull(true)
   @Column({ type: DataType.STRING(15) })
   declare phone?: string;
 
-  // Información Académica
   @AllowNull(false)
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare hasAllergies?: boolean;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare allergiesDescription?: string;
+
+  @AllowNull(false)
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare hasDiseases?: boolean;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare diseasesDescription?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare emergencyContact?: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(15) })
+  declare emergencyPhone?: string;
+
+  @AllowNull(true)
   @Column({ type: DataType.DATE })
   declare admissionDate?: Date;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Column({ type: DataType.STRING(20) })
   declare initialSchoolYear?: string;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Column({ type: DataType.STRING(20) })
   declare currentGrade?: string;
 
-  @AllowNull(false)
+  @AllowNull(true)
   @Column({ type: DataType.STRING(10) })
   declare section?: string;
 
   @AllowNull(false)
-  @Default('regular')
+  @Default('pendiente')
   @Column({ 
-    type: DataType.ENUM('regular', 'repitiente', 'condicionado')
+    type: DataType.ENUM('pendiente', 'regular', 'repitiente', 'condicionado', 'inactivo')
   })
-  declare status?: string;
+  declare status?: 'pendiente' | 'regular' | 'repitiente' | 'condicionado' | 'inactivo';
 
-  // Relaciones
+  @AllowNull(false)
+  @Default(0.00)
+  @Column({ 
+    type: DataType.DECIMAL(12, 2),
+    get() {
+      const value = this.getDataValue('balance');
+      return value !== null && value !== undefined ? parseFloat(value) : 0.00;
+    }
+  })
+  declare balance?: number;
+
+  // --- NUEVOS CAMPOS ---
+  @AllowNull(false)
+  @Default(0)
+  @Column({ type: DataType.DECIMAL(5, 2) })
+  declare exonerationPercent?: number;
+
+  @AllowNull(false)
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN })
+  declare hasPaidInscription?: boolean;
+  // --- FIN NUEVOS CAMPOS ---
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(150) })
+  declare previousSchool?: string;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(100) })
+  declare municipality?: string;
+
   @ForeignKey(() => Representative)
   @AllowNull(false)
   @Column({ type: DataType.UUID })
@@ -78,4 +154,23 @@ export default class Student extends Model<typestudent_full> {
 
   @BelongsTo(() => UserLogin)
   declare user?: UserLogin;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare comment1?: string;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare comment2?: string;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare comment3?: string;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(50) })
+  declare class?: string;
+
+  @HasMany(() => StudentSchedule)
+  declare studentSchedules?: StudentSchedule[];
 }
