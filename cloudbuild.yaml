@@ -3,7 +3,7 @@ steps:
     args:
       - 'build'
       - '-f'
-      - 'dockerfile'
+      - 'Dockerfile'
       - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:latest'
       - '.'
