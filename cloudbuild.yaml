@@ -2,8 +2,10 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
-      - '-f', 'dockerfile'
-      - '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:${_IMAGE_TAG}'
+      - '-f'
+      - 'dockerfile'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:${_IMAGE_TAG}'
       - '.'
   - name: 'gcr.io/cloud-builders/docker'
     args:
