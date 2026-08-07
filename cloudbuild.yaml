@@ -3,7 +3,7 @@ steps:
     args:
       - 'build'
       - '-f'
-      - 'Dockerfile'                          # ← coincide con tu archivo real
+      - 'Dockerfile'                   
       - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/ueabreu-backend/ueabreu-backend:${_IMAGE_TAG}'
       - '.'
