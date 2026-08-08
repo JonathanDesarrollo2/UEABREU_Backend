@@ -11,6 +11,7 @@ import Representative from "../database/models/representative";
 import sequelize from "../database/config";
 import { Transaction } from "sequelize";
 import Teacher from "../database/models/teacher";
+import { BillingService } from "../services/billingServices";
 
 //#endregion
 
@@ -144,7 +145,7 @@ static adduser = async (req: Request, res: Response) => {
                                             emergencyPhone: studentData.emergencyPhone,
                                             representativeId: newRepresentative.id,
                                             userId: newUser.id,
-                                            status: studentData.status || 'pendiente', // ✅ TOMA STATUS DEL FRONTEND
+                                            status: studentData.status || 'pendiente',
                                             admissionDate: new Date(),
                                             initialSchoolYear: new Date().getFullYear().toString(),
                                             currentGrade: studentData.currentGrade || 'En asignar',
@@ -168,6 +169,31 @@ static adduser = async (req: Request, res: Response) => {
 
         // Confirmar transacción
         await transaction.commit();
+
+        // ✅ NUEVO: Si el usuario es representante activo, aplicar cargos de inscripción
+        if (newUser.nivel === 1 && newUser.userstatus && representativeData && studentsData && Array.isArray(studentsData)) {
+            // Recuperar los estudiantes recién creados
+            const createdStudents = await Student.findAll({
+                where: { userId: newUser.id },
+            });
+
+            // También necesitamos el representante para pasar su ID
+            const representative = await Representative.findOne({
+                where: { userId: newUser.id },
+            });
+
+            if (representative && createdStudents.length > 0) {
+                for (const student of createdStudents) {
+                    try {
+                        // isNewStudent = true (nuevo ingreso)
+                        await BillingService.applyInscriptionFees(student.id!, representative.id!, true);
+                    } catch (feeError) {
+                        console.error(`Error aplicando cuotas al estudiante ${student.id}:`, feeError);
+                        // No detenemos la respuesta; el usuario ya fue creado.
+                    }
+                }
+            }
+        }
         
         res.status(200).json({ 
             result: true, 
