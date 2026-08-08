@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { SimulationController } from "../../controllers/simulationController";
+import { SimulationController } from "../../controllers/SimulationControllers";
 
 const SimulationRouter = Router();
 
