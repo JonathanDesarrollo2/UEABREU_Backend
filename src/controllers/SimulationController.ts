@@ -18,7 +18,7 @@ export class SimulationController {
     }
   };
 
-  // Establecer una nueva fecha simulada
+  // Establecer una nueva fecha simulada 
   static setSimulatedDate = async (req: Request, res: Response) => {
     try {
       const { date } = req.body; // formato 'YYYY-MM-DD'
