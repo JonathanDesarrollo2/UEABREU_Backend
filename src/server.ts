@@ -17,7 +17,7 @@ import PublicRouter from "./database/routes/publicRoutes";
 import SettingsRouter from "./database/routes/settingsRoutes";
 import RegistrationManagementRouter from "./database/routes/registrationManagementRoutes";
 import FeeRoutes from "./database/routes/FeeRoutes";
-import SimulationRouter from "./database/routes/simulation";
+import SimulationRouter from "./database/routes/SimulationRoutes";
 
 dotenv.config();
 //#endregion
