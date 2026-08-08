@@ -10,6 +10,7 @@ import sequelize from "../database/config";
 import { Op } from "sequelize";
 import { BankAPI } from "../bank/bank-api";
 import SchoolFee from "../database/models/ScoolFee";
+import { getCurrentDate } from "../utility/dateHelper";   // ← única línea añadida
 
 export class BillingService {
   /**
@@ -54,7 +55,7 @@ export class BillingService {
    * Los montos en USD se convierten a Bs usando la tasa BCV del día.
    */
   static async applyMonthlyFee() {
-    const today = new Date();
+    const today = await getCurrentDate();   // ← usa la fecha simulada si existe
     const fees = await this.getSchoolFees();
     const startDate = new Date(fees.monthlyFeeStartDate!);
     if (today < startDate) return;
@@ -184,7 +185,7 @@ export class BillingService {
       }
 
       // Mensualidad del mes en curso si ya comenzaron las mensualidades
-      const today = new Date();
+      const today = await getCurrentDate();   // ← usa la fecha simulada si existe
       const monthlyStart = new Date(fees.monthlyFeeStartDate!);
       if (today >= monthlyStart) {
         const year = today.getFullYear();
@@ -242,7 +243,7 @@ export class BillingService {
    * Verifica si un representante ya alcanzó el máximo de 2 depósitos en el mes actual.
    */
   static async checkMonthlyDepositLimit(representativeId: string): Promise<boolean> {
-    const now = new Date();
+    const now = await getCurrentDate();   // ← usa la fecha simulada si existe
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
@@ -263,7 +264,7 @@ export class BillingService {
    * Se llama después de registrar un depósito (pago) para un estudiante.
    */
   static async applyEarlyPaymentDiscount(studentId: string, representativeId: string) {
-    const today = new Date();
+    const today = await getCurrentDate();   // ← usa la fecha simulada si existe
     const fees = await this.getSchoolFees();
     if (today.getDate() > fees.prontoPagoDeadlineDay!) return;
 
