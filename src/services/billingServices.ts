@@ -19,30 +19,138 @@ export class BillingService {
    * - Si no, llama a la API del banco con un timeout de 3 segundos.
    * - Si falla o expira, usa una tasa de respaldo (45 Bs/USD).
    */
-  private static async getCurrentBCVRate(): Promise<number> {
-    // 1. Si hay una tasa fija para pruebas, se usa directamente
-    if (process.env.BCV_TEST_RATE) {
-      const rate = parseFloat(process.env.BCV_TEST_RATE);
-      if (!isNaN(rate) && rate > 0) {
-        console.log(`💱 Usando tasa BCV de prueba (fija): ${rate} Bs/USD`);
-        return rate;
-      }
-    }
-
-    // 2. Intentar obtener la tasa real con un timeout de 3 segundos
-    try {
-      const bankAPI = new BankAPI();
-      const timeoutPromise = new Promise<{ PriceRateBCV: number }>((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout al obtener tasa BCV")), 3000)
-      );
-      const bcvRate = await Promise.race([bankAPI.getBCVRate(), timeoutPromise]);
-      console.log(`💱 Tasa BCV obtenida del banco: ${bcvRate.PriceRateBCV} Bs/USD`);
-      return bcvRate.PriceRateBCV;
-    } catch (error) {
-      console.error("⚠️ No se pudo obtener la tasa BCV, usando tasa de respaldo (45):", error);
-      return 45; // tasa de respaldo
+// Cambia private a public en esta línea
+public static async getCurrentBCVRate(): Promise<number> {
+  if (process.env.BCV_TEST_RATE) {
+    const rate = parseFloat(process.env.BCV_TEST_RATE);
+    if (!isNaN(rate) && rate > 0) {
+      console.log(`💱 Usando tasa BCV de prueba (fija): ${rate} Bs/USD`);
+      return rate;
     }
   }
+
+  try {
+    const bankAPI = new BankAPI();
+    const timeoutPromise = new Promise<{ PriceRateBCV: number }>((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout al obtener tasa BCV")), 3000)
+    );
+    const bcvRate = await Promise.race([bankAPI.getBCVRate(), timeoutPromise]);
+    console.log(`💱 Tasa BCV obtenida del banco: ${bcvRate.PriceRateBCV} Bs/USD`);
+    return bcvRate.PriceRateBCV;
+  } catch (error) {
+    console.error("⚠️ No se pudo obtener la tasa BCV, usando tasa de respaldo (45):", error);
+    return 45;
+  }
+}
+
+// NUEVO MÉTODO: aplica cuotas de inscripción reutilizando una transacción existente
+public static async applyInscriptionFeesWithTransaction(
+  studentId: string,
+  representativeId: string,
+  isNewStudent: boolean,
+  bcvRate: number,
+  transaction: any   // transacción Sequelize
+) {
+  const student = await Student.findByPk(studentId, { transaction });
+  if (!student) return;
+
+  const fees = await this.getSchoolFees();
+  let currentBalance = student.balance || 0;
+
+  if (!student.hasPaidInscription) {
+    const inscriptionBS = Math.round(fees.inscriptionFeeUSD! * bcvRate * 100) / 100;
+    await Transaction.create({
+      studentId: student.id,
+      representativeId,
+      type: TransactionType.FEE,
+      amount: inscriptionBS,
+      description: "Inscripción año escolar 2026-2027",
+      paymentMethod: PaymentMethod.CASH,
+      status: TransactionStatus.COMPLETED,
+      balanceBefore: currentBalance,
+      balanceAfter: currentBalance - inscriptionBS,
+    }, { transaction });
+    currentBalance -= inscriptionBS;
+  }
+
+  if (isNewStudent && !student.hasPaidInscription) {
+    const adminBS = Math.round(fees.administrativeFeeUSD! * bcvRate * 100) / 100;
+    await Transaction.create({
+      studentId: student.id,
+      representativeId,
+      type: TransactionType.FEE,
+      amount: adminBS,
+      description: "Gasto administrativo (nuevo ingreso)",
+      paymentMethod: PaymentMethod.CASH,
+      status: TransactionStatus.COMPLETED,
+      balanceBefore: currentBalance,
+      balanceAfter: currentBalance - adminBS,
+    }, { transaction });
+    currentBalance -= adminBS;
+  }
+
+  if (!student.hasPaidInscription) {
+    const halfBS = Math.round(fees.august2027HalfPaymentUSD! * bcvRate * 100) / 100;
+    await Transaction.create({
+      studentId: student.id,
+      representativeId,
+      type: TransactionType.FEE,
+      amount: halfBS,
+      description: "Anticipo 50% mensualidad Agosto 2027",
+      paymentMethod: PaymentMethod.CASH,
+      status: TransactionStatus.COMPLETED,
+      balanceBefore: currentBalance,
+      balanceAfter: currentBalance - halfBS,
+    }, { transaction });
+    currentBalance -= halfBS;
+  }
+
+  const today = await getCurrentDate();
+  const monthlyStart = new Date(fees.monthlyFeeStartDate!);
+  if (today >= monthlyStart) {
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const monthNames = [
+      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ];
+    const existingMonthly = await Transaction.findOne({
+      where: {
+        studentId: student.id,
+        type: TransactionType.FEE,
+        description: `Mensualidad ${monthNames[month]} ${year}`,
+        createdAt: {
+          [Op.gte]: new Date(year, month, 1),
+          [Op.lt]: new Date(year, month + 1, 1)
+        }
+      },
+      transaction,
+    });
+    if (!existingMonthly) {
+      const exoneration = student.exonerationPercent || 0;
+      let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
+      monthlyUSD = Math.round(monthlyUSD * 100) / 100;
+      const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
+      await Transaction.create({
+        studentId: student.id,
+        representativeId,
+        type: TransactionType.FEE,
+        amount: monthlyBS,
+        description: `Mensualidad ${monthNames[month]} ${year}`,
+        paymentMethod: PaymentMethod.CASH,
+        status: TransactionStatus.COMPLETED,
+        balanceBefore: currentBalance,
+        balanceAfter: currentBalance - monthlyBS,
+      }, { transaction });
+      currentBalance -= monthlyBS;
+    }
+  }
+
+  await student.update({
+    balance: currentBalance,
+    hasPaidInscription: true,
+  }, { transaction });
+}
 
   // ─── El resto de los métodos permanecen EXACTAMENTE IGUAL ─────────────
 
