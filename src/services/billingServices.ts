@@ -10,17 +10,33 @@ import sequelize from "../database/config";
 import { Op } from "sequelize";
 import { BankAPI } from "../bank/bank-api";
 import SchoolFee from "../database/models/ScoolFee";
-import { getCurrentDate } from "../utility/dateHelper";   // ← única línea añadida
+import { getCurrentDate } from "../utility/dateHelper";
 
 export class BillingService {
   /**
-   * Obtiene la tasa BCV actual (Bs por USD) usando la API del banco.
-   * Si falla, usa una tasa de respaldo (45 Bs/USD) para no detener el proceso.
+   * Obtiene la tasa BCV actual.
+   * - Si existe la variable de entorno BCV_TEST_RATE, la usa (sin llamar al banco).
+   * - Si no, llama a la API del banco con un timeout de 3 segundos.
+   * - Si falla o expira, usa una tasa de respaldo (45 Bs/USD).
    */
   private static async getCurrentBCVRate(): Promise<number> {
+    // 1. Si hay una tasa fija para pruebas, se usa directamente
+    if (process.env.BCV_TEST_RATE) {
+      const rate = parseFloat(process.env.BCV_TEST_RATE);
+      if (!isNaN(rate) && rate > 0) {
+        console.log(`💱 Usando tasa BCV de prueba (fija): ${rate} Bs/USD`);
+        return rate;
+      }
+    }
+
+    // 2. Intentar obtener la tasa real con un timeout de 3 segundos
     try {
       const bankAPI = new BankAPI();
-      const bcvRate = await bankAPI.getBCVRate();
+      const timeoutPromise = new Promise<{ PriceRateBCV: number }>((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout al obtener tasa BCV")), 3000)
+      );
+      const bcvRate = await Promise.race([bankAPI.getBCVRate(), timeoutPromise]);
+      console.log(`💱 Tasa BCV obtenida del banco: ${bcvRate.PriceRateBCV} Bs/USD`);
       return bcvRate.PriceRateBCV;
     } catch (error) {
       console.error("⚠️ No se pudo obtener la tasa BCV, usando tasa de respaldo (45):", error);
@@ -28,9 +44,8 @@ export class BillingService {
     }
   }
 
-  /**
-   * Obtiene (o crea) la configuración de tarifas para el año escolar activo.
-   */
+  // ─── El resto de los métodos permanecen EXACTAMENTE IGUAL ─────────────
+
   private static async getSchoolFees(): Promise<SchoolFee> {
     let fee = await SchoolFee.findOne({ where: { schoolYear: '2026-2027' } });
     if (!fee) {
@@ -50,18 +65,14 @@ export class BillingService {
     return fee;
   }
 
-  /**
-   * Aplica la mensualidad a todos los estudiantes regulares el día 1 de cada mes.
-   * Los montos en USD se convierten a Bs usando la tasa BCV del día.
-   */
   static async applyMonthlyFee() {
-    const today = await getCurrentDate();   // ← usa la fecha simulada si existe
+    const today = await getCurrentDate();
     const fees = await this.getSchoolFees();
     const startDate = new Date(fees.monthlyFeeStartDate!);
     if (today < startDate) return;
 
     const year = today.getFullYear();
-    const month = today.getMonth(); // 0-indexado
+    const month = today.getMonth();
     const monthNames = [
       "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
       "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
@@ -82,7 +93,6 @@ export class BillingService {
 
       const feeBS = Math.round(feeUSD * bcvRate * 100) / 100;
 
-      // Evitar duplicados en el mismo mes
       const existing = await Transaction.findOne({
         where: {
           studentId: student.id,
@@ -96,7 +106,6 @@ export class BillingService {
       });
       if (existing) continue;
 
-      // Crear la transacción de cargo
       await Transaction.create({
         studentId: student.id,
         representativeId: student.representativeId!,
@@ -113,10 +122,6 @@ export class BillingService {
     }
   }
 
-  /**
-   * Aplica las cuotas únicas al activar un estudiante (inscripción, gasto administrativo,
-   * anticipo agosto 2027) y, si ya comenzaron las mensualidades, la del mes en curso.
-   */
   static async applyInscriptionFees(
     studentId: string,
     representativeId: string,
@@ -133,7 +138,6 @@ export class BillingService {
     try {
       let currentBalance = student.balance || 0;
 
-      // Inscripción (solo si no se ha cobrado antes)
       if (!student.hasPaidInscription) {
         const inscriptionBS = Math.round(fees.inscriptionFeeUSD! * bcvRate * 100) / 100;
         await Transaction.create({
@@ -150,7 +154,6 @@ export class BillingService {
         currentBalance -= inscriptionBS;
       }
 
-      // Gasto administrativo (solo nuevos ingresos)
       if (isNewStudent && !student.hasPaidInscription) {
         const adminBS = Math.round(fees.administrativeFeeUSD! * bcvRate * 100) / 100;
         await Transaction.create({
@@ -167,7 +170,6 @@ export class BillingService {
         currentBalance -= adminBS;
       }
 
-      // Anticipo 50% mensualidad agosto 2027 (si no se ha cobrado)
       if (!student.hasPaidInscription) {
         const halfBS = Math.round(fees.august2027HalfPaymentUSD! * bcvRate * 100) / 100;
         await Transaction.create({
@@ -184,8 +186,7 @@ export class BillingService {
         currentBalance -= halfBS;
       }
 
-      // Mensualidad del mes en curso si ya comenzaron las mensualidades
-      const today = await getCurrentDate();   // ← usa la fecha simulada si existe
+      const today = await getCurrentDate();
       const monthlyStart = new Date(fees.monthlyFeeStartDate!);
       if (today >= monthlyStart) {
         const year = today.getFullYear();
@@ -226,7 +227,6 @@ export class BillingService {
         }
       }
 
-      // Marcar que la inscripción ya fue pagada
       await student.update({
         balance: currentBalance,
         hasPaidInscription: true,
@@ -239,11 +239,8 @@ export class BillingService {
     }
   }
 
-  /**
-   * Verifica si un representante ya alcanzó el máximo de 2 depósitos en el mes actual.
-   */
   static async checkMonthlyDepositLimit(representativeId: string): Promise<boolean> {
-    const now = await getCurrentDate();   // ← usa la fecha simulada si existe
+    const now = await getCurrentDate();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
@@ -259,12 +256,8 @@ export class BillingService {
     return count >= 2;
   }
 
-  /**
-   * Aplica descuento por pronto pago si corresponde.
-   * Se llama después de registrar un depósito (pago) para un estudiante.
-   */
   static async applyEarlyPaymentDiscount(studentId: string, representativeId: string) {
-    const today = await getCurrentDate();   // ← usa la fecha simulada si existe
+    const today = await getCurrentDate();
     const fees = await this.getSchoolFees();
     if (today.getDate() > fees.prontoPagoDeadlineDay!) return;
 
@@ -275,7 +268,6 @@ export class BillingService {
       "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
     ];
 
-    // Buscar si existe una deuda de mensualidad para este mes
     const existingFee = await Transaction.findOne({
       where: {
         studentId,
