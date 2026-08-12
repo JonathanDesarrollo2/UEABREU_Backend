@@ -1130,4 +1130,32 @@ static updateExoneration = async (req: Request, res: Response) => {
     res.status(500).json({ result: false, content: [], error: ['Error al actualizar exoneración'] });
   }
 };
+
+static updateSection = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { section } = req.body;
+
+    const student = await Student.findByPk(id);
+    if (!student) {
+      return res.status(404).json({ result: false, content: [], error: ['Estudiante no encontrado'] });
+    }
+
+    if (!section || typeof section !== 'string' || section.trim().length === 0 || section.length > 10) {
+      return res.status(400).json({ result: false, content: [], error: ['Sección inválida'] });
+    }
+
+    student.section = section.trim().toUpperCase();
+    await student.save();
+
+    res.status(200).json({
+      result: true,
+      content: [`Sección actualizada a "${student.section}"`],
+      error: []
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("updateSection"));
+    res.status(500).json({ result: false, content: [], error: ['Error al actualizar la sección'] });
+  }
+};
 }

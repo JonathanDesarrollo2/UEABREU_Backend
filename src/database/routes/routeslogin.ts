@@ -172,4 +172,15 @@ RouterUser.put('/students/:id/exoneration',
   validateRoutes,
   User.updateExoneration
 );
+
+// ========== NUEVA RUTA: Actualizar sección del estudiante ==========
+RouterUser.put('/students/:id/section',
+  authsession,
+  param('id').isUUID().withMessage('ID de estudiante inválido'),
+  body('section')
+    .notEmpty().withMessage('La sección es requerida')
+    .isString().isLength({ min: 1, max: 10 }).withMessage('Sección inválida (máx. 10 caracteres)'),
+  validateRoutes,
+  User.updateSection   // ← este método debes haberlo añadido antes en UserController
+);
 export default RouterUser;
