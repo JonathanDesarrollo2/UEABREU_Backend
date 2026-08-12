@@ -1019,57 +1019,62 @@ static adduser = async (req: Request, res: Response) => {
     
     //#region: Obtener lista de estudiantes (para dashboard)
     static listStudents = async (req: Request, res: Response) => {
-        try {
-            const { page = 1, limit = 100, status, search } = req.query;
-            const offset = (Number(page) - 1) * Number(limit);
-            
-            const where: any = {};
-            
-            if (status) {
-                where.status = status;
-            }
-            
-            if (search && typeof search === 'string') {
-                where[Op.or] = [
-                    { fullName: { [Op.iLike]: `%${search}%` } },
-                    { identityCard: { [Op.iLike]: `%${search}%` } },
-                    { currentGrade: { [Op.iLike]: `%${search}%` } }
-                ];
-            }
-            
-            const { count, rows: students } = await Student.findAndCountAll({
-                where,
-                limit: Number(limit),
-                offset,
-                order: [['fullName', 'ASC']],
-                attributes: ['id', 'fullName', 'identityCard', 'birthDate', 'status', 'currentGrade', 'section', 'createdAt', 'balance'],
-                include: [{
-                    model: Representative,
-                    as: 'representative',
-                    attributes: ['id', 'fullName', 'identityCard']
-                }]
-            });
-            
-            res.status(200).json({
-                result: true,
-                content: students,
-                pagination: {
-                    totalRecords: count,
-                    currentPage: Number(page),
-                    totalPages: Math.ceil(count / Number(limit)),
-                },
-                error: []
-            });
-            
-        } catch (error: any) {
-            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
-            res.status(500).json({ 
-                result: false, 
-                content: [], 
-                error: ['Error al obtener estudiantes'] 
-            });
+    try {
+        const { page = 1, limit = 100, status, search } = req.query;
+        const offset = (Number(page) - 1) * Number(limit);
+        
+        const where: any = {};
+        
+        if (status) {
+            where.status = status;
         }
-    };
+        
+        if (search && typeof search === 'string') {
+            where[Op.or] = [
+                { fullName: { [Op.iLike]: `%${search}%` } },
+                { identityCard: { [Op.iLike]: `%${search}%` } },
+                { currentGrade: { [Op.iLike]: `%${search}%` } }
+            ];
+        }
+        
+        const { count, rows: students } = await Student.findAndCountAll({
+            where,
+            limit: Number(limit),
+            offset,
+            order: [['fullName', 'ASC']],
+            // ✅ Añadido representativeId explícitamente
+            attributes: [
+                'id', 'fullName', 'identityCard', 'birthDate', 'status',
+                'currentGrade', 'section', 'createdAt', 'balance',
+                'exonerationPercent', 'admissionDate', 'representativeId'  // ← CLAVE
+            ],
+            include: [{
+                model: Representative,
+                as: 'representative',
+                attributes: ['id', 'fullName', 'identityCard']
+            }]
+        });
+        
+        res.status(200).json({
+            result: true,
+            content: students,
+            pagination: {
+                totalRecords: count,
+                currentPage: Number(page),
+                totalPages: Math.ceil(count / Number(limit)),
+            },
+            error: []
+        });
+        
+    } catch (error: any) {
+        ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
+        res.status(500).json({ 
+            result: false, 
+            content: [], 
+            error: ['Error al obtener estudiantes'] 
+        });
+    }
+};
     //#endregion
     
     //#region: Estadísticas de usuarios (para dashboard)
