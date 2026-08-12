@@ -121,26 +121,55 @@ static activateApplication = async (req: Request, res: Response) => {
     application.user.userstatus = true;
     await application.user.save({ transaction });
 
-    // Cambiar estado de todos los estudiantes del representante a 'regular'
-    await Student.update(
+    // Solo los estudiantes con estado "pendiente" pasan a "regular" (no repitientes)
+    const [updatedRows] = await Student.update(
       { status: "regular" },
-      { where: { userId: application.userId }, transaction }
+      {
+        where: { userId: application.userId, status: 'pendiente' },
+        transaction,
+      }
+    );
+    console.log(`✅ ${updatedRows} estudiante(s) activado(s)`);
+
+    // Asegurar que todos los estudiantes tengan fecha de admisión (si no la tienen)
+    // ✅ CORREGIDO: usar [Op.is]: null en lugar de null
+    await Student.update(
+      { admissionDate: new Date() },
+      {
+        where: {
+          userId: application.userId,
+          admissionDate: null as any
+        },
+        transaction,
+      }
     );
 
-    // ✅ Obtener tasa BCV UNA SOLA VEZ, fuera de transacciones internas
+    // Obtener tasa BCV una sola vez
     const bcvRate = await BillingService.getCurrentBCVRate();
 
-    // Aplicar cargos de inscripción usando la MISMA transacción
-    const students = await Student.findAll({ where: { userId: application.userId }, transaction });
+    // Aplicar cargos de inscripción solo a estudiantes que:
+    // - están recién activados (status = "regular" y hasPaidInscription = false)
+    // - NO son repitientes
+    const students = await Student.findAll({
+      where: {
+        userId: application.userId,
+        status: 'regular',
+        hasPaidInscription: false,
+      },
+      transaction,
+    });
+
     for (const student of students) {
-      const isNewStudent = !student.hasPaidInscription;
-      await BillingService.applyInscriptionFeesWithTransaction(
-        student.id!,
-        application.representativeId!,
-        isNewStudent,
-        bcvRate,
-        transaction       // <--- pasamos la transacción externa
-      );
+      // Doble seguridad: no aplicar cargos a repitientes
+      if (student.status !== 'repitiente') {
+        await BillingService.applyInscriptionFeesWithTransaction(
+          student.id!,
+          application.representativeId!,
+          true,                     // isNewStudent = true
+          bcvRate,
+          transaction
+        );
+      }
     }
 
     await transaction.commit();

@@ -13,147 +13,145 @@ import SchoolFee from "../database/models/ScoolFee";
 import { getCurrentDate } from "../utility/dateHelper";
 
 export class BillingService {
-  /**
-   * Obtiene la tasa BCV actual.
-   * - Si existe la variable de entorno BCV_TEST_RATE, la usa (sin llamar al banco).
-   * - Si no, llama a la API del banco con un timeout de 3 segundos.
-   * - Si falla o expira, usa una tasa de respaldo (45 Bs/USD).
-   */
-// Cambia private a public en esta línea
-public static async getCurrentBCVRate(): Promise<number> {
-  if (process.env.BCV_TEST_RATE) {
-    const rate = parseFloat(process.env.BCV_TEST_RATE);
-    if (!isNaN(rate) && rate > 0) {
-      console.log(`💱 Usando tasa BCV de prueba (fija): ${rate} Bs/USD`);
-      return rate;
+
+  // Tasa BCV pública (usada en activación)
+  public static async getCurrentBCVRate(): Promise<number> {
+    if (process.env.BCV_TEST_RATE) {
+      const rate = parseFloat(process.env.BCV_TEST_RATE);
+      if (!isNaN(rate) && rate > 0) {
+        console.log(`💱 Usando tasa BCV de prueba (fija): ${rate} Bs/USD`);
+        return rate;
+      }
+    }
+
+    try {
+      const bankAPI = new BankAPI();
+      const timeoutPromise = new Promise<{ PriceRateBCV: number }>((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout al obtener tasa BCV")), 3000)
+      );
+      const bcvRate = await Promise.race([bankAPI.getBCVRate(), timeoutPromise]);
+      console.log(`💱 Tasa BCV obtenida del banco: ${bcvRate.PriceRateBCV} Bs/USD`);
+      return bcvRate.PriceRateBCV;
+    } catch (error) {
+      console.error("⚠️ No se pudo obtener la tasa BCV, usando tasa de respaldo (45):", error);
+      return 45;
     }
   }
 
-  try {
-    const bankAPI = new BankAPI();
-    const timeoutPromise = new Promise<{ PriceRateBCV: number }>((_, reject) =>
-      setTimeout(() => reject(new Error("Timeout al obtener tasa BCV")), 3000)
-    );
-    const bcvRate = await Promise.race([bankAPI.getBCVRate(), timeoutPromise]);
-    console.log(`💱 Tasa BCV obtenida del banco: ${bcvRate.PriceRateBCV} Bs/USD`);
-    return bcvRate.PriceRateBCV;
-  } catch (error) {
-    console.error("⚠️ No se pudo obtener la tasa BCV, usando tasa de respaldo (45):", error);
-    return 45;
-  }
-}
+  // Cuotas de inscripción dentro de una transacción externa (sin abrir nueva)
+  public static async applyInscriptionFeesWithTransaction(
+    studentId: string,
+    representativeId: string,
+    isNewStudent: boolean,
+    bcvRate: number,
+    transaction: any
+  ) {
+    const student = await Student.findByPk(studentId, { transaction });
+    if (!student) return;
 
-// NUEVO MÉTODO: aplica cuotas de inscripción reutilizando una transacción existente
-public static async applyInscriptionFeesWithTransaction(
-  studentId: string,
-  representativeId: string,
-  isNewStudent: boolean,
-  bcvRate: number,
-  transaction: any   // transacción Sequelize
-) {
-  const student = await Student.findByPk(studentId, { transaction });
-  if (!student) return;
+    const fees = await this.getSchoolFees();
+    let currentBalance = student.balance || 0;
 
-  const fees = await this.getSchoolFees();
-  let currentBalance = student.balance || 0;
-
-  if (!student.hasPaidInscription) {
-    const inscriptionBS = Math.round(fees.inscriptionFeeUSD! * bcvRate * 100) / 100;
-    await Transaction.create({
-      studentId: student.id,
-      representativeId,
-      type: TransactionType.FEE,
-      amount: inscriptionBS,
-      description: "Inscripción año escolar 2026-2027",
-      paymentMethod: PaymentMethod.CASH,
-      status: TransactionStatus.COMPLETED,
-      balanceBefore: currentBalance,
-      balanceAfter: currentBalance - inscriptionBS,
-    }, { transaction });
-    currentBalance -= inscriptionBS;
-  }
-
-  if (isNewStudent && !student.hasPaidInscription) {
-    const adminBS = Math.round(fees.administrativeFeeUSD! * bcvRate * 100) / 100;
-    await Transaction.create({
-      studentId: student.id,
-      representativeId,
-      type: TransactionType.FEE,
-      amount: adminBS,
-      description: "Gasto administrativo (nuevo ingreso)",
-      paymentMethod: PaymentMethod.CASH,
-      status: TransactionStatus.COMPLETED,
-      balanceBefore: currentBalance,
-      balanceAfter: currentBalance - adminBS,
-    }, { transaction });
-    currentBalance -= adminBS;
-  }
-
-  if (!student.hasPaidInscription) {
-    const halfBS = Math.round(fees.august2027HalfPaymentUSD! * bcvRate * 100) / 100;
-    await Transaction.create({
-      studentId: student.id,
-      representativeId,
-      type: TransactionType.FEE,
-      amount: halfBS,
-      description: "Anticipo 50% mensualidad Agosto 2027",
-      paymentMethod: PaymentMethod.CASH,
-      status: TransactionStatus.COMPLETED,
-      balanceBefore: currentBalance,
-      balanceAfter: currentBalance - halfBS,
-    }, { transaction });
-    currentBalance -= halfBS;
-  }
-
-  const today = await getCurrentDate();
-  const monthlyStart = new Date(fees.monthlyFeeStartDate!);
-  if (today >= monthlyStart) {
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const monthNames = [
-      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-    ];
-    const existingMonthly = await Transaction.findOne({
-      where: {
-        studentId: student.id,
-        type: TransactionType.FEE,
-        description: `Mensualidad ${monthNames[month]} ${year}`,
-        createdAt: {
-          [Op.gte]: new Date(year, month, 1),
-          [Op.lt]: new Date(year, month + 1, 1)
-        }
-      },
-      transaction,
-    });
-    if (!existingMonthly) {
-      const exoneration = student.exonerationPercent || 0;
-      let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
-      monthlyUSD = Math.round(monthlyUSD * 100) / 100;
-      const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
+    // Inscripción
+    if (!student.hasPaidInscription) {
+      const inscriptionBS = Math.round(fees.inscriptionFeeUSD! * bcvRate * 100) / 100;
       await Transaction.create({
         studentId: student.id,
         representativeId,
         type: TransactionType.FEE,
-        amount: monthlyBS,
-        description: `Mensualidad ${monthNames[month]} ${year}`,
+        amount: inscriptionBS,
+        description: "Inscripción año escolar 2026-2027",
         paymentMethod: PaymentMethod.CASH,
         status: TransactionStatus.COMPLETED,
         balanceBefore: currentBalance,
-        balanceAfter: currentBalance - monthlyBS,
+        balanceAfter: currentBalance - inscriptionBS,
       }, { transaction });
-      currentBalance -= monthlyBS;
+      currentBalance -= inscriptionBS;
     }
+
+    // Gasto administrativo (solo nuevos ingresos)
+    if (isNewStudent && !student.hasPaidInscription) {
+      const adminBS = Math.round(fees.administrativeFeeUSD! * bcvRate * 100) / 100;
+      await Transaction.create({
+        studentId: student.id,
+        representativeId,
+        type: TransactionType.FEE,
+        amount: adminBS,
+        description: "Gasto administrativo (nuevo ingreso)",
+        paymentMethod: PaymentMethod.CASH,
+        status: TransactionStatus.COMPLETED,
+        balanceBefore: currentBalance,
+        balanceAfter: currentBalance - adminBS,
+      }, { transaction });
+      currentBalance -= adminBS;
+    }
+
+    // Anticipo agosto 2027
+    if (!student.hasPaidInscription) {
+      const halfBS = Math.round(fees.august2027HalfPaymentUSD! * bcvRate * 100) / 100;
+      await Transaction.create({
+        studentId: student.id,
+        representativeId,
+        type: TransactionType.FEE,
+        amount: halfBS,
+        description: "Anticipo 50% mensualidad Agosto 2027",
+        paymentMethod: PaymentMethod.CASH,
+        status: TransactionStatus.COMPLETED,
+        balanceBefore: currentBalance,
+        balanceAfter: currentBalance - halfBS,
+      }, { transaction });
+      currentBalance -= halfBS;
+    }
+
+    // Mensualidad del mes en curso (si ya iniciaron)
+    const today = await getCurrentDate();
+    const monthlyStart = new Date(fees.monthlyFeeStartDate!);
+    if (today >= monthlyStart) {
+      const year = today.getFullYear();
+      const month = today.getMonth();
+      const monthNames = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+      ];
+      const existingMonthly = await Transaction.findOne({
+        where: {
+          studentId: student.id,
+          type: TransactionType.FEE,
+          description: `Mensualidad ${monthNames[month]} ${year}`,
+          createdAt: {
+            [Op.gte]: new Date(year, month, 1),
+            [Op.lt]: new Date(year, month + 1, 1)
+          }
+        },
+        transaction,
+      });
+      if (!existingMonthly) {
+        const exoneration = student.exonerationPercent || 0;
+        let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
+        monthlyUSD = Math.round(monthlyUSD * 100) / 100;
+        const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
+        await Transaction.create({
+          studentId: student.id,
+          representativeId,
+          type: TransactionType.FEE,
+          amount: monthlyBS,
+          description: `Mensualidad ${monthNames[month]} ${year}`,
+          paymentMethod: PaymentMethod.CASH,
+          status: TransactionStatus.COMPLETED,
+          balanceBefore: currentBalance,
+          balanceAfter: currentBalance - monthlyBS,
+        }, { transaction });
+        currentBalance -= monthlyBS;
+      }
+    }
+
+    await student.update({
+      balance: currentBalance,
+      hasPaidInscription: true,
+    }, { transaction });
   }
 
-  await student.update({
-    balance: currentBalance,
-    hasPaidInscription: true,
-  }, { transaction });
-}
-
-  // ─── El resto de los métodos permanecen EXACTAMENTE IGUAL ─────────────
-
+  // ─── MÉTODOS PRIVADOS Y PÚBLICOS YA EXISTENTES (sin cambios) ─────────
   private static async getSchoolFees(): Promise<SchoolFee> {
     let fee = await SchoolFee.findOne({ where: { schoolYear: '2026-2027' } });
     if (!fee) {
