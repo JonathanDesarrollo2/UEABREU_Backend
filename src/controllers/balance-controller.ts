@@ -508,36 +508,52 @@ export class BalanceController {
 
   // Transacciones recientes (para dashboard)
   static getRecentTransactions = async (req: Request, res: Response) => {
-    try {
-      const limit = Number(req.query.limit) || 10;
+  try {
+    const limit = Number(req.query.limit) || 10;
 
-      const transactions = await Transaction.findAll({
-        limit,
-        order: [['createdAt', 'DESC']],
-        include: [
-          {
-            model: Representative,
-            as: 'representative',
-            attributes: ['fullName', 'identityCard']
-          }
-        ]
-      });
+    const transactions = await Transaction.findAll({
+      limit,
+      order: [['createdAt', 'DESC']],
+      attributes: [
+        'id', 'type', 'amount', 'amountUSD', 'description',  // ← incluimos los nuevos campos
+        'paymentMethod', 'reference', 'status', 'createdAt',
+        'balanceBefore', 'balanceAfter'
+      ],
+      include: [
+        {
+          model: Representative,
+          as: 'representative',
+          attributes: ['fullName', 'identityCard']
+        }
+      ]
+    });
 
-      res.status(200).json({
-        result: true,
-        content: transactions,
-        error: []
-      });
+    // Formatear para el dashboard
+    const formatted = transactions.map(t => ({
+      id: t.id,
+      date: t.createdAt?.toISOString().split('T')[0],
+      representativeName: t.representative?.fullName || 'N/A',
+      type: t.type,
+      amount: t.amount,
+      amountUSD: t.amountUSD || 0,       // valor histórico
+      description: t.description || '',
+      status: t.status
+    }));
 
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
-      res.status(500).json({
-        result: false,
-        content: [],
-        error: ['Error al obtener transacciones recientes']
-      });
-    }
-  };
+    res.status(200).json({
+      result: true,
+      content: formatted,
+      error: []
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
+    res.status(500).json({
+      result: false,
+      content: [],
+      error: ['Error al obtener transacciones recientes']
+    });
+  }
+};
 
 // Reemplaza el método manualDeposit en BalanceController con esta versión
 

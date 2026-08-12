@@ -154,6 +154,16 @@ declare reference?: string;
   })
   declare balanceAfter?: number;
 
+  @AllowNull(true)
+  @Column({
+    type: DataType.DECIMAL(12, 2),
+    get() {
+      const value = this.getDataValue('amountUSD');
+      return value ? parseFloat(value) : 0.00;
+    }
+  })
+  declare amountUSD?: number;
+
   // Métodos de ayuda
   isSuccessful(): boolean {
     return this.status === TransactionStatus.COMPLETED;
