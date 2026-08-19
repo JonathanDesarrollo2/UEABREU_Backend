@@ -1,5 +1,4 @@
-// src/services/billingService.ts
-
+// src/services/billingServices.ts
 import Student from "../database/models/student";
 import Transaction, {
   TransactionType,
@@ -14,7 +13,6 @@ import { getCurrentDate } from "../utility/dateHelper";
 
 export class BillingService {
 
-  // Tasa BCV pública (usada en activación)
   public static async getCurrentBCVRate(): Promise<number> {
     if (process.env.BCV_TEST_RATE) {
       const rate = parseFloat(process.env.BCV_TEST_RATE);
@@ -38,7 +36,25 @@ export class BillingService {
     }
   }
 
-  // Cuotas de inscripción dentro de una transacción externa (sin abrir nueva)
+  private static async getSchoolFees(): Promise<SchoolFee> {
+    let fee = await SchoolFee.findOne({ where: { schoolYear: '2026-2027' } });
+    if (!fee) {
+      fee = await SchoolFee.create({
+        schoolYear: '2026-2027',
+        inscriptionFeeUSD: 80,
+        monthlyFeeUSD: 100,
+        prontoPagoDiscount: 10,
+        prontoPagoDeadlineDay: 10,
+        administrativeFeeUSD: 20,
+        august2027HalfPaymentUSD: 45,
+        monthlyFeeStartDate: '2026-09-01',
+        inscriptionStartDate: '2026-07-15',
+        inscriptionEndDate: '2026-10-01',
+      });
+    }
+    return fee;
+  }
+
   public static async applyInscriptionFeesWithTransaction(
     studentId: string,
     representativeId: string,
@@ -61,7 +77,8 @@ export class BillingService {
         representativeId,
         type: TransactionType.FEE,
         amount: bs,
-        amountUSD: usd,                     // ← guardamos USD
+        amountUSD: usd,
+        bcvRate,
         description: "Inscripción año escolar 2026-2027",
         paymentMethod: PaymentMethod.CASH,
         status: TransactionStatus.COMPLETED,
@@ -81,6 +98,7 @@ export class BillingService {
         type: TransactionType.FEE,
         amount: bs,
         amountUSD: usd,
+        bcvRate,
         description: "Gasto administrativo (nuevo ingreso)",
         paymentMethod: PaymentMethod.CASH,
         status: TransactionStatus.COMPLETED,
@@ -100,6 +118,7 @@ export class BillingService {
         type: TransactionType.FEE,
         amount: bs,
         amountUSD: usd,
+        bcvRate,
         description: "Anticipo 50% mensualidad Agosto 2027",
         paymentMethod: PaymentMethod.CASH,
         status: TransactionStatus.COMPLETED,
@@ -143,6 +162,7 @@ export class BillingService {
           type: TransactionType.FEE,
           amount: monthlyBS,
           amountUSD: monthlyUSD,
+          bcvRate,
           description: desc,
           paymentMethod: PaymentMethod.CASH,
           status: TransactionStatus.COMPLETED,
@@ -159,27 +179,6 @@ export class BillingService {
     }, { transaction });
   }
 
-  // ─── MÉTODOS ORIGINALES (ya existentes, solo se modifican para guardar amountUSD) ───
-
-  private static async getSchoolFees(): Promise<SchoolFee> {
-    let fee = await SchoolFee.findOne({ where: { schoolYear: '2026-2027' } });
-    if (!fee) {
-      fee = await SchoolFee.create({
-        schoolYear: '2026-2027',
-        inscriptionFeeUSD: 80,
-        monthlyFeeUSD: 100,
-        prontoPagoDiscount: 10,
-        prontoPagoDeadlineDay: 10,
-        administrativeFeeUSD: 20,
-        august2027HalfPaymentUSD: 45,
-        monthlyFeeStartDate: '2026-09-01',
-        inscriptionStartDate: '2026-07-15',
-        inscriptionEndDate: '2026-10-01',
-      });
-    }
-    return fee;
-  }
-
   static async applyMonthlyFee() {
     const today = await getCurrentDate();
     const fees = await this.getSchoolFees();
@@ -194,10 +193,14 @@ export class BillingService {
     ];
 
     const bcvRate = await this.getCurrentBCVRate();
-    console.log(`💱 Tasa BCV para mensualidades: ${bcvRate} Bs/USD`);
 
+    // ✅ Incluir repitiente y condicionado, excluir pendiente e inactivo
     const students = await Student.findAll({
-      where: { status: 'regular' },
+      where: {
+        status: {
+          [Op.in]: ['regular', 'repitiente', 'condicionado']
+        }
+      }
     });
 
     for (const student of students) {
@@ -228,6 +231,7 @@ export class BillingService {
         type: TransactionType.FEE,
         amount: feeBS,
         amountUSD: feeUSD,
+        bcvRate,
         description: desc,
         paymentMethod: PaymentMethod.CASH,
         status: TransactionStatus.COMPLETED,
@@ -249,9 +253,8 @@ export class BillingService {
 
     const fees = await this.getSchoolFees();
     const bcvRate = await this.getCurrentBCVRate();
-    console.log(`💱 Tasa BCV para inscripción: ${bcvRate} Bs/USD`);
-
     const t = await sequelize.transaction();
+
     try {
       let currentBalance = student.balance || 0;
 
@@ -264,6 +267,7 @@ export class BillingService {
           type: TransactionType.FEE,
           amount: bs,
           amountUSD: usd,
+          bcvRate,
           description: "Inscripción año escolar 2026-2027",
           paymentMethod: PaymentMethod.CASH,
           status: TransactionStatus.COMPLETED,
@@ -282,6 +286,7 @@ export class BillingService {
           type: TransactionType.FEE,
           amount: bs,
           amountUSD: usd,
+          bcvRate,
           description: "Gasto administrativo (nuevo ingreso)",
           paymentMethod: PaymentMethod.CASH,
           status: TransactionStatus.COMPLETED,
@@ -300,6 +305,7 @@ export class BillingService {
           type: TransactionType.FEE,
           amount: bs,
           amountUSD: usd,
+          bcvRate,
           description: "Anticipo 50% mensualidad Agosto 2027",
           paymentMethod: PaymentMethod.CASH,
           status: TransactionStatus.COMPLETED,
@@ -342,6 +348,7 @@ export class BillingService {
             type: TransactionType.FEE,
             amount: monthlyBS,
             amountUSD: monthlyUSD,
+            bcvRate,
             description: desc,
             paymentMethod: PaymentMethod.CASH,
             status: TransactionStatus.COMPLETED,
@@ -419,6 +426,7 @@ export class BillingService {
         type: TransactionType.ADJUSTMENT,
         amount: discountBS,
         amountUSD: discountUSD,
+        bcvRate,
         description: desc,
         paymentMethod: PaymentMethod.CASH,
         status: TransactionStatus.COMPLETED,

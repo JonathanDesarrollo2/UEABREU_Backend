@@ -106,9 +106,8 @@ static adduser = async (req: Request, res: Response) => {
                             userId: newUser.id
                         }, { transaction });
 
-                        // CREAR ESTUDIANTES con balance individual
+                        // CREAR ESTUDIANTES con balance individual y fecha de ingreso
                         if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
-                            // Distribuir el initialBalance entre los estudiantes (solo como fallback)
                             const initialBalance = representativeData.initialBalance || 0;
                             const perStudentBalance = studentsData.length > 0 ? initialBalance / studentsData.length : 0;
 
@@ -117,7 +116,6 @@ static adduser = async (req: Request, res: Response) => {
                                     continue;
                                 }
 
-                                // Verificar si la cédula del estudiante ya existe
                                 const existingStudent = await Student.findOne({
                                     where: { identityCard: studentData.identityCard },
                                     transaction
@@ -127,6 +125,16 @@ static adduser = async (req: Request, res: Response) => {
                                     try {
                                         const studentBalance = studentData.balance !== undefined ? studentData.balance : perStudentBalance;
                                         
+                                        // ✅ Cast para admitir admissionDate
+                                        const typedStudentData = studentData as any;
+                                        let admissionDate = new Date();
+                                        if (typedStudentData.admissionDate) {
+                                            const parsedDate = new Date(typedStudentData.admissionDate);
+                                            if (!isNaN(parsedDate.getTime())) {
+                                                admissionDate = parsedDate;
+                                            }
+                                        }
+
                                         await Student.create({
                                             fullName: studentData.fullName,
                                             identityCard: studentData.identityCard,
@@ -146,21 +154,19 @@ static adduser = async (req: Request, res: Response) => {
                                             representativeId: newRepresentative.id,
                                             userId: newUser.id,
                                             status: studentData.status || 'pendiente',
-                                            admissionDate: new Date(),
+                                            admissionDate: admissionDate,
                                             initialSchoolYear: new Date().getFullYear().toString(),
                                             currentGrade: studentData.currentGrade || 'En asignar',
                                             section: studentData.section || 'Pendiente',
                                             balance: studentBalance
                                         }, { transaction });
                                     } catch (studentError: any) {
-                                        // Continuamos con el siguiente estudiante
                                         console.error('Error creando estudiante:', studentError);
                                     }
                                 }
                             }
                         }
                     } catch (repError: any) {
-                        // No hacemos rollback, continuamos sin representante
                         console.error('Error creando representante:', repError);
                     }
                 }
@@ -170,14 +176,13 @@ static adduser = async (req: Request, res: Response) => {
         // Confirmar transacción
         await transaction.commit();
 
-        // ✅ NUEVO: Si el usuario es representante activo, aplicar cargos de inscripción
-        if (newUser.nivel === 1 && newUser.userstatus && representativeData && studentsData && Array.isArray(studentsData)) {
-            // Recuperar los estudiantes recién creados
+        // ✅ MODIFICACIÓN: Solo aplicar cuotas de inscripción SI NO estamos en 2026
+        const currentYear = new Date().getFullYear();
+        if (currentYear !== 2026 && newUser.nivel === 1 && newUser.userstatus && representativeData && studentsData && Array.isArray(studentsData)) {
             const createdStudents = await Student.findAll({
                 where: { userId: newUser.id },
             });
 
-            // También necesitamos el representante para pasar su ID
             const representative = await Representative.findOne({
                 where: { userId: newUser.id },
             });
@@ -185,11 +190,9 @@ static adduser = async (req: Request, res: Response) => {
             if (representative && createdStudents.length > 0) {
                 for (const student of createdStudents) {
                     try {
-                        // isNewStudent = true (nuevo ingreso)
                         await BillingService.applyInscriptionFees(student.id!, representative.id!, true);
                     } catch (feeError) {
                         console.error(`Error aplicando cuotas al estudiante ${student.id}:`, feeError);
-                        // No detenemos la respuesta; el usuario ya fue creado.
                     }
                 }
             }
@@ -201,7 +204,6 @@ static adduser = async (req: Request, res: Response) => {
             error: [] 
         }); 
     } catch (error: any) {
-        // Revertir transacción en caso de error
         await transaction.rollback();
         
         if (error.name === 'SequelizeValidationError') {

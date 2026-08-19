@@ -506,55 +506,6 @@ export class BalanceController {
     }
   };
 
-  // Transacciones recientes (para dashboard)
-  static getRecentTransactions = async (req: Request, res: Response) => {
-  try {
-    const limit = Number(req.query.limit) || 10;
-
-    const transactions = await Transaction.findAll({
-      limit,
-      order: [['createdAt', 'DESC']],
-      attributes: [
-        'id', 'type', 'amount', 'amountUSD', 'description',  // ← incluimos los nuevos campos
-        'paymentMethod', 'reference', 'status', 'createdAt',
-        'balanceBefore', 'balanceAfter'
-      ],
-      include: [
-        {
-          model: Representative,
-          as: 'representative',
-          attributes: ['fullName', 'identityCard']
-        }
-      ]
-    });
-
-    // Formatear para el dashboard
-    const formatted = transactions.map(t => ({
-      id: t.id,
-      date: t.createdAt?.toISOString().split('T')[0],
-      representativeName: t.representative?.fullName || 'N/A',
-      type: t.type,
-      amount: t.amount,
-      amountUSD: t.amountUSD || 0,       // valor histórico
-      description: t.description || '',
-      status: t.status
-    }));
-
-    res.status(200).json({
-      result: true,
-      content: formatted,
-      error: []
-    });
-  } catch (error: any) {
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
-    res.status(500).json({
-      result: false,
-      content: [],
-      error: ['Error al obtener transacciones recientes']
-    });
-  }
-};
-
 // Reemplaza el método manualDeposit en BalanceController con esta versión
 
 static manualDeposit = async (req: Request, res: Response) => {
@@ -947,85 +898,48 @@ static getRepresentativeByEmail = async (req: Request, res: Response) => {
     });
   }
 };
-static getAllTransactions = async (req: Request, res: Response) => {
+static updateExoneration = async (req: Request, res: Response) => {
   try {
-    const {
-      page = 1,
-      limit = 20,
-      representativeId,
-      studentId,
-      type,
-      status,
-      startDate,
-      endDate,
-      search,
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
-    } = req.query;
+    const { id } = req.params;
+    const { exonerationPercent } = req.body;
+    const student = await Student.findByPk(id);
+    if (!student) {
+      return res.status(404).json({ result: false, error: ['Estudiante no encontrado'] });
+    }
+    student.exonerationPercent = exonerationPercent;
+    await student.save();
+    res.json({ result: true, content: [`Exoneración actualizada a ${exonerationPercent}%`], error: [] });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("updateExoneration"));
+    res.status(500).json({ result: false, content: [], error: ['Error al actualizar exoneración'] });
+  }
+};
 
-    const offset = (Number(page) - 1) * Number(limit);
-    const where: any = {};
+static updateSection = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { section } = req.body;
 
-    if (representativeId) where.representativeId = representativeId;
-    if (studentId) where.studentId = studentId;
-    if (type) where.type = type;
-    if (status) where.status = status;
-
-    if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
-      if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
+    const student = await Student.findByPk(id);
+    if (!student) {
+      return res.status(404).json({ result: false, content: [], error: ['Estudiante no encontrado'] });
     }
 
-    if (search) {
-      where[Op.or] = [
-        { description: { [Op.iLike]: `%${search}%` } },
-        { reference: { [Op.iLike]: `%${search}%` } },
-        { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
-        { '$student.fullName$': { [Op.iLike]: `%${search}%` } },
-      ];
+    if (!section || typeof section !== 'string' || section.trim().length === 0 || section.length > 10) {
+      return res.status(400).json({ result: false, content: [], error: ['Sección inválida'] });
     }
 
-    const { count, rows: transactions } = await Transaction.findAndCountAll({
-      where,
-      limit: Number(limit),
-      offset,
-      order: [[sortBy as string, sortOrder === 'asc' ? 'ASC' : 'DESC']],
-      include: [
-        {
-          model: Representative,
-          as: 'representative',
-          attributes: ['id', 'fullName', 'identityCard']
-        },
-        {
-          model: Student,
-          as: 'student',
-          required: false,
-          attributes: ['id', 'fullName', 'currentGrade']
-        }
-      ]
-    });
+    student.section = section.trim().toUpperCase();
+    await student.save();
 
     res.status(200).json({
       result: true,
-      content: {
-        transactions,
-        pagination: {
-          totalRecords: count,
-          currentPage: Number(page),
-          totalPages: Math.ceil(count / Number(limit)),
-          pageSize: Number(limit)
-        }
-      },
+      content: [`Sección actualizada a "${student.section}"`],
       error: []
     });
   } catch (error: any) {
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getAllTransactions"));
-    res.status(500).json({
-      result: false,
-      content: [],
-      error: ['Error al obtener transacciones']
-    });
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("updateSection"));
+    res.status(500).json({ result: false, content: [], error: ['Error al actualizar la sección'] });
   }
 };
 }
