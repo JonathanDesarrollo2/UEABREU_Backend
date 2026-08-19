@@ -52,7 +52,6 @@ export default class Transaction extends Model {
   @BelongsTo(() => Representative)
   declare representative?: Representative;
 
-  // NUEVO: Relación con Student
   @ForeignKey(() => Student)
   @AllowNull(true)
   @Column({ type: DataType.UUID })
@@ -83,6 +82,29 @@ export default class Transaction extends Model {
   })
   declare amount?: number;
 
+  // NUEVO: Monto en USD histórico
+  @AllowNull(true)
+  @Default(0.00)
+  @Column({
+    type: DataType.DECIMAL(12, 2),
+    get() {
+      const value = this.getDataValue('amountUSD');
+      return value ? parseFloat(value) : 0.00;
+    }
+  })
+  declare amountUSD?: number;
+
+  // NUEVO: Tasa BCV usada (Bs/USD)
+  @AllowNull(true)
+  @Column({
+    type: DataType.DECIMAL(10, 4),
+    get() {
+      const value = this.getDataValue('bcvRate');
+      return value ? parseFloat(value) : 0.0000;
+    }
+  })
+  declare bcvRate?: number;
+
   @AllowNull(true)
   @Column({ type: DataType.STRING(500) })
   declare description?: string;
@@ -92,11 +114,11 @@ export default class Transaction extends Model {
   declare paymentMethod?: PaymentMethod;
 
   @AllowNull(true)
-@Column({
-  type: DataType.STRING(100),
-  unique: true   // ← AÑADIR ESTO
-})
-declare reference?: string;
+  @Column({
+    type: DataType.STRING(100),
+    unique: true
+  })
+  declare reference?: string;
 
   @AllowNull(false)
   @Default(TransactionStatus.COMPLETED)
@@ -111,7 +133,6 @@ declare reference?: string;
   @Column({ type: DataType.DATE })
   declare processedAt?: Date;
 
-  // Campos para búsqueda rápida
   @AllowNull(true)
   @Column({ type: DataType.STRING(50) })
   declare externalReference?: string;
@@ -124,7 +145,6 @@ declare reference?: string;
   @Column({ type: DataType.STRING(50) })
   declare accountNumber?: string;
 
-  // Campos para filtros
   @AllowNull(true)
   @Column({ type: DataType.DATEONLY })
   declare transactionDate?: Date;
@@ -133,7 +153,6 @@ declare reference?: string;
   @Column({ type: DataType.STRING(50) })
   declare category?: string;
 
-  // Nuevos campos para balance before/after (opcional, si los usas)
   @AllowNull(true)
   @Column({
     type: DataType.DECIMAL(12, 2),
@@ -154,7 +173,7 @@ declare reference?: string;
   })
   declare balanceAfter?: number;
 
-  // Métodos de ayuda
+  // Métodos de ayuda (sin cambios)
   isSuccessful(): boolean {
     return this.status === TransactionStatus.COMPLETED;
   }

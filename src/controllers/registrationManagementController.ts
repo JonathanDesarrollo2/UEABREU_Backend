@@ -127,11 +127,20 @@ static activateApplication = async (req: Request, res: Response) => {
       { where: { userId: application.userId }, transaction }
     );
 
-    // Aplicar cargos de inscripción a cada estudiante recién activado
+    // ✅ Obtener tasa BCV UNA SOLA VEZ, fuera de transacciones internas
+    const bcvRate = await BillingService.getCurrentBCVRate();
+
+    // Aplicar cargos de inscripción usando la MISMA transacción
     const students = await Student.findAll({ where: { userId: application.userId }, transaction });
     for (const student of students) {
       const isNewStudent = !student.hasPaidInscription;
-      await BillingService.applyInscriptionFees(student.id!, application.representativeId!, isNewStudent);
+      await BillingService.applyInscriptionFeesWithTransaction(
+        student.id!,
+        application.representativeId!,
+        isNewStudent,
+        bcvRate,
+        transaction       // <--- pasamos la transacción externa
+      );
     }
 
     await transaction.commit();

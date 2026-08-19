@@ -7,7 +7,7 @@ import UserLogin from "../database/models/userlogin";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
-import { Op, fn, col } from "sequelize";
+import { Op, fn, col, Order } from "sequelize";
 import { BillingService } from "../services/billingServices";
 
 export class BalanceController {
@@ -506,38 +506,7 @@ export class BalanceController {
     }
   };
 
-  // Transacciones recientes (para dashboard)
-  static getRecentTransactions = async (req: Request, res: Response) => {
-    try {
-      const limit = Number(req.query.limit) || 10;
 
-      const transactions = await Transaction.findAll({
-        limit,
-        order: [['createdAt', 'DESC']],
-        include: [
-          {
-            model: Representative,
-            as: 'representative',
-            attributes: ['fullName', 'identityCard']
-          }
-        ]
-      });
-
-      res.status(200).json({
-        result: true,
-        content: transactions,
-        error: []
-      });
-
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
-      res.status(500).json({
-        result: false,
-        content: [],
-        error: ['Error al obtener transacciones recientes']
-      });
-    }
-  };
 
 // Reemplaza el método manualDeposit en BalanceController con esta versión
 
@@ -931,20 +900,56 @@ static getRepresentativeByEmail = async (req: Request, res: Response) => {
     });
   }
 };
+static getRecentTransactions = async (req: Request, res: Response) => {
+  try {
+    const limit = Number(req.query.limit) || 10;
+
+    const transactions = await Transaction.findAll({
+      limit,
+      order: [['createdAt', 'DESC']] as Order,  // ← tipado seguro
+      attributes: [
+        'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
+        'paymentMethod', 'reference', 'status', 'createdAt',
+        'balanceBefore', 'balanceAfter', 'studentId', 'representativeId'
+      ],
+      include: [
+        {
+          model: Representative,
+          as: 'representative',
+          attributes: ['id', 'fullName', 'identityCard']
+        }
+      ]
+    });
+
+    const formatted = transactions.map(t => {
+      const paymentStatus = (t.type === TransactionType.DEPOSIT && (t.balanceAfter ?? 0) < 0) ? 'incompleto' : 'completo';
+      return {
+        id: t.id,
+        date: t.createdAt ? new Date(t.createdAt).toLocaleDateString('es-VE') : 'N/A',
+        representativeName: t.representative?.fullName || 'N/A',
+        type: t.type,
+        description: t.description,
+        amount: t.amount,
+        amountUSD: t.amountUSD,
+        bcvRate: t.bcvRate,
+        balanceAfter: t.balanceAfter,
+        paymentStatus,
+        status: t.status
+      };
+    });
+
+    res.status(200).json({ result: true, content: formatted, error: [] });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRecentTransactions"));
+    res.status(500).json({ result: false, content: [], error: ['Error al obtener transacciones recientes'] });
+  }
+};
+
 static getAllTransactions = async (req: Request, res: Response) => {
   try {
     const {
-      page = 1,
-      limit = 20,
-      representativeId,
-      studentId,
-      type,
-      status,
-      startDate,
-      endDate,
-      search,
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
+      page = 1, limit = 20, representativeId, studentId,
+      type, status, startDate, endDate, search, sortBy, sortOrder
     } = req.query;
 
     const offset = (Number(page) - 1) * Number(limit);
@@ -966,50 +971,79 @@ static getAllTransactions = async (req: Request, res: Response) => {
         { description: { [Op.iLike]: `%${search}%` } },
         { reference: { [Op.iLike]: `%${search}%` } },
         { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
-        { '$student.fullName$': { [Op.iLike]: `%${search}%` } },
+        { '$student.fullName$': { [Op.iLike]: `%${search}%` } }
       ];
+    }
+
+    // Construir order de forma tipada
+    const order: Order = [];
+    if (sortBy && sortOrder) {
+      const direction = String(sortOrder).toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+      order.push([sortBy as string, direction]);
+    } else {
+      order.push(['createdAt', 'DESC']);
     }
 
     const { count, rows: transactions } = await Transaction.findAndCountAll({
       where,
       limit: Number(limit),
       offset,
-      order: [[sortBy as string, sortOrder === 'asc' ? 'ASC' : 'DESC']],
+      order,  // ← ya es de tipo Order
+      attributes: [
+        'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
+        'paymentMethod', 'reference', 'status', 'createdAt',
+        'balanceBefore', 'balanceAfter', 'studentId', 'representativeId'
+      ],
       include: [
+        {
+          model: Student,
+          as: 'student',
+          attributes: ['id', 'fullName', 'currentGrade']
+        },
         {
           model: Representative,
           as: 'representative',
           attributes: ['id', 'fullName', 'identityCard']
-        },
-        {
-          model: Student,
-          as: 'student',
-          required: false,
-          attributes: ['id', 'fullName', 'currentGrade']
         }
-      ]
+      ],
+      distinct: true,
+    });
+
+    const formatted = transactions.map(t => {
+      const paymentStatus = (t.type === TransactionType.DEPOSIT && (t.balanceAfter ?? 0) < 0) ? 'incompleto' : 'completo';
+      return {
+        id: t.id,
+        type: t.type,
+        amount: t.amount,
+        amountUSD: t.amountUSD,
+        bcvRate: t.bcvRate,
+        description: t.description,
+        paymentMethod: t.paymentMethod,
+        reference: t.reference,
+        status: t.status,
+        paymentStatus,
+        balanceAfter: t.balanceAfter,
+        createdAt: t.createdAt,
+        student: t.student,
+        representative: t.representative
+      };
     });
 
     res.status(200).json({
       result: true,
       content: {
-        transactions,
+        transactions: formatted,
         pagination: {
           totalRecords: count,
           currentPage: Number(page),
           totalPages: Math.ceil(count / Number(limit)),
-          pageSize: Number(limit)
         }
       },
       error: []
     });
   } catch (error: any) {
     ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getAllTransactions"));
-    res.status(500).json({
-      result: false,
-      content: [],
-      error: ['Error al obtener transacciones']
-    });
+    res.status(500).json({ result: false, content: [], error: ['Error al obtener transacciones'] });
   }
 };
 }
