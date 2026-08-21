@@ -589,7 +589,7 @@ static adduser = async (req: Request, res: Response) => {
                                 attributes: [
                                     'id', 'fullName', 'identityCard', 'birthDate', 'status', 
                                     'emergencyContact', 'emergencyPhone', 'currentGrade', 'section',
-                                    'balance' // ✅ Campo balance incluido
+                                    'balance', 'admissionDate'
                                 ]
                             }
                         ]
