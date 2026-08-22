@@ -183,4 +183,11 @@ RouterUser.put('/students/:id/section',
   validateRoutes,
   User.updateSection   // ← este método debes haberlo añadido antes en UserController
 );
+
+RouterUser.post('/impersonate/:id',
+  authsession,
+  param('id').isUUID().withMessage('ID de usuario inválido'),
+  validateRoutes,
+  User.impersonate
+);
 export default RouterUser;

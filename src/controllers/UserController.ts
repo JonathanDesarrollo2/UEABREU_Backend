@@ -1160,4 +1160,69 @@ static updateSection = async (req: Request, res: Response) => {
     res.status(500).json({ result: false, content: [], error: ['Error al actualizar la sección'] });
   }
 };
+static impersonate = async (req: Request, res: Response) => {
+  try {
+    const adminId = req.tokenData?.id;
+    const adminNivel = req.tokenData?.nivel;
+
+    // Solo administradores (nivel 2) pueden suplantar
+    if (!adminId || adminNivel !== 2) {
+      return res.status(403).json({
+        result: false,
+        content: [],
+        error: ['No tienes permisos para realizar esta acción']
+      });
+    }
+
+    const { id } = req.params;
+    const targetUser = await UserLogin.findByPk(id);
+
+    if (!targetUser) {
+      return res.status(404).json({
+        result: false,
+        content: [],
+        error: ['Usuario no encontrado']
+      });
+    }
+
+    // Generar token del usuario objetivo
+    const jwtUser = generateJWT({
+      id: targetUser.id!,
+      userlogin: targetUser.userlogin!,
+      username: targetUser.username || targetUser.userlogin!,
+      usermail: targetUser.usermail!,
+      nivel: targetUser.nivel!,
+    });
+
+    if (!jwtUser) {
+      return res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error generando token de suplantación']
+      });
+    }
+
+    res.status(200).json({
+      result: true,
+      content: {
+        token: jwtUser,
+        user: {
+          id: targetUser.id,
+          userlogin: targetUser.userlogin,
+          usermail: targetUser.usermail,
+          username: targetUser.username,
+          nivel: targetUser.nivel,
+        },
+      },
+      error: [],
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("impersonate"));
+    res.status(500).json({
+      result: false,
+      content: [],
+      error: ['Error al suplantar usuario']
+    });
+  }
+};
 }
