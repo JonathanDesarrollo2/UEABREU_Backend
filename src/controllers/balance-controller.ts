@@ -340,73 +340,126 @@ export class BalanceController {
 
   // Historial de transacciones
   static getTransactionHistory = async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const {
-        page = 1,
-        limit = 20,
-        type,
-        status,
-        startDate,
-        endDate
-      } = req.query;
+  try {
+    const { id } = req.params;
+    const {
+      page = 1,
+      limit = 20,
+      type,
+      status,
+      startDate,
+      endDate,
+      studentId,        // ✅ Nuevo filtro por estudiante
+      search,           // ✅ Nuevo filtro por búsqueda
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
 
-      const offset = (Number(page) - 1) * Number(limit);
+    const offset = (Number(page) - 1) * Number(limit);
 
-      const where: any = { representativeId: id };
+    const where: any = { representativeId: id };
 
-      if (type) where.type = type;
-      if (status) where.status = status;
+    if (type) where.type = type;
+    if (status) where.status = status;
+    if (studentId) where.studentId = studentId;
 
-      if (startDate || endDate) {
-        where.createdAt = {};
-        if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
-        if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
-      }
-
-      const { count, rows: transactions } = await Transaction.findAndCountAll({
-        where,
-        limit: Number(limit),
-        offset,
-        order: [['createdAt', 'DESC']],
-        include: [
-          {
-            model: Representative,
-            as: 'representative',
-            attributes: ['fullName', 'identityCard']
-          },
-          {
-            model: Student,
-            as: 'student',
-            required: false,
-            attributes: ['id', 'fullName']
-          }
-        ]
-      });
-
-      res.status(200).json({
-        result: true,
-        content: {
-          transactions,
-          pagination: {
-            totalRecords: count,
-            currentPage: Number(page),
-            totalPages: Math.ceil(count / Number(limit)),
-            pageSize: Number(limit)
-          }
-        },
-        error: []
-      });
-
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionHistory"));
-      res.status(500).json({
-        result: false,
-        content: [],
-        error: ['Error al obtener historial']
-      });
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
+      if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
     }
-  };
+
+    if (search) {
+      where[Op.or] = [
+        { description: { [Op.iLike]: `%${search}%` } },
+        { reference: { [Op.iLike]: `%${search}%` } },
+        { '$student.fullName$': { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    const order: any = [[String(sortBy), String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC']];
+
+    const { count, rows: transactions } = await Transaction.findAndCountAll({
+      where,
+      limit: Number(limit),
+      offset,
+      order,
+      attributes: [
+        'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
+        'paymentMethod', 'reference', 'status', 'createdAt',
+        'balanceBefore', 'balanceAfter', 'studentId', 'representativeId'
+      ],
+      include: [
+        {
+          model: Student,
+          as: 'student',
+          required: false,
+          attributes: ['id', 'fullName', 'currentGrade', 'section', 'status']
+        },
+        {
+          model: Representative,
+          as: 'representative',
+          attributes: ['id', 'fullName', 'identityCard']
+        }
+      ],
+      distinct: true,
+    });
+
+    const formatted = transactions.map(t => {
+      const isDeposit = t.type === TransactionType.DEPOSIT;
+      const balanceAfter = t.balanceAfter ?? 0;
+      const pendingAmount = balanceAfter < 0 ? Math.abs(balanceAfter) : 0;
+      const creditAmount = balanceAfter > 0 ? balanceAfter : 0;
+      const paidAmount = isDeposit ? t.amount : 0;
+      const displayStatus = (t.type === TransactionType.FEE || t.type === TransactionType.ADJUSTMENT) 
+        ? 'Pendiente' 
+        : (t.status === TransactionStatus.COMPLETED ? 'Completado' : t.status);
+
+      return {
+        id: t.id,
+        type: t.type,
+        amount: t.amount,
+        amountUSD: t.amountUSD,
+        bcvRate: t.bcvRate,
+        description: t.description,
+        paymentMethod: t.paymentMethod,
+        reference: t.reference,
+        status: t.status,
+        displayStatus,
+        pendingAmount,
+        creditAmount,
+        paidAmount,
+        balanceAfter,
+        balanceBefore: t.balanceBefore,
+        createdAt: t.createdAt,
+        student: t.student,
+        representative: t.representative
+      };
+    });
+
+    res.status(200).json({
+      result: true,
+      content: {
+        transactions: formatted,
+        pagination: {
+          totalRecords: count,
+          currentPage: Number(page),
+          totalPages: Math.ceil(count / Number(limit)),
+          pageSize: Number(limit)
+        }
+      },
+      error: []
+    });
+
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getTransactionHistory"));
+    res.status(500).json({
+      result: false,
+      content: [],
+      error: ['Error al obtener historial']
+    });
+  }
+};
 
   // Estadísticas financieras (ahora basadas en balances de estudiantes)
   static getFinancialStatistics = async (req: Request, res: Response) => {
