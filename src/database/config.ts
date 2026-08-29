@@ -16,8 +16,11 @@ import BlockTimeConfig from "./models/blockTimeConfig";
 import Setting from "./models/settings";
 // ⭐ NUEVOS MODELOS ⭐
 import PlanillaCounter from "./models/PlanillaCounter";
-import RegistrationApplication from "./models/RegistrationAplicattion"; // Ajusta el nombre si es "RegistrationApplication"
+import RegistrationApplication from "./models/RegistrationAplicattion";
 import SchoolFee from "./models/ScoolFee";
+// 🔐 NUEVOS MODELOS PARA SEGURIDAD
+import AdminPassword from "./models/AdminPassword";
+import AuditLog from "./models/auditLog";
 
 dotenv.config();
 
@@ -57,9 +60,11 @@ if (NODE_ENV === 'production') {
       StudentSchedule,
       BlockTimeConfig,
       Setting,
-      PlanillaCounter,        
-      RegistrationApplication, 
-      SchoolFee
+      PlanillaCounter,
+      RegistrationApplication,
+      SchoolFee,
+      AdminPassword,   // ✅ NUEVO
+      AuditLog         // ✅ NUEVO
     ],
     logging: console.log,
     pool: {
@@ -89,9 +94,11 @@ if (NODE_ENV === 'production') {
       StudentSchedule,
       BlockTimeConfig,
       Setting,
-      PlanillaCounter,        
-      RegistrationApplication, 
-      SchoolFee
+      PlanillaCounter,
+      RegistrationApplication,
+      SchoolFee,
+      AdminPassword,   // ✅ NUEVO
+      AuditLog         // ✅ NUEVO
     ],
     logging: console.log,
     pool: {
@@ -133,7 +140,6 @@ export const connectToDatabase = async () => {
         console.log(colors.green.bold('✅ Usuario admin creado.'));
       }
     } else {
-      // ⚠️ IMPORTANTE: Para desarrollo, descomenta sync({ alter: true })
       // await sequelize.sync({ alter: true });
       console.log(colors.green.bold('✅ Modelos sincronizados (desarrollo).'));
     }

@@ -4,6 +4,7 @@ import { validateRoutes } from "../../middleware/validateRoutes";
 import { User } from "../../controllers/UserController"; // Ajusta la ruta según tu estructura
 import { loginLimiter } from "../../utility/loginLimiter";
 import { authsession } from "../../utility/authsession";
+import { AdminPasswordController } from "../../controllers/AdminPasswordController";
 
 const RouterUser = Router();
 
@@ -189,5 +190,17 @@ RouterUser.post('/impersonate/:id',
   param('id').isUUID().withMessage('ID de usuario inválido'),
   validateRoutes,
   User.impersonate
+);
+
+RouterUser.post('/admin-password/set',
+  authsession,
+  body('password').isString().isLength({ min: 12 }).withMessage('La contraseña debe tener al menos 12 caracteres'),
+  validateRoutes,
+  AdminPasswordController.setPassword
+);
+
+RouterUser.get('/admin-password/status',
+  authsession,
+  AdminPasswordController.checkPasswordStatus
 );
 export default RouterUser;
