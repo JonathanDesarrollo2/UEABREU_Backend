@@ -1,59 +1,121 @@
-// src/controllers/SimulationController.ts
-import { Request, Response } from "express";
-import Setting from "../database/models/settings";
-import { ErrorLog } from "../utility/ErrorLog";
-import { getErrorLocation } from "../utility/callerinfo";
-import { BillingService } from "../services/billingServices";
+// src/controllers/SimulationControllers.ts
+import type { Request, Response } from 'express';
+import sequelize from '../database/config';
+import Student from '../database/models/student';
+import Transaction from '../database/models/transaction';
+import Representative from '../database/models/representative';
+import UserLogin from '../database/models/userlogin';
+import RegistrationApplication from '../database/models/RegistrationAplicattion';
+import { ErrorLog } from '../utility/ErrorLog';
+import { getErrorLocation } from '../utility/callerinfo';
+import { BillingService } from '../services/billingServices';
 
 export class SimulationController {
-  // Obtener la fecha simulada actual
-  static getSimulatedDate = async (req: Request, res: Response) => {
+
+  // ─── FECHA SIMULADA ────────────────────────────────────────────────
+  static getSimulatedDate = async (_req: Request, res: Response) => {
     try {
-      const setting = await Setting.findOne({ where: { key: 'simulated_date' } });
-      const simulatedDate = setting ? setting.value : null;
-      res.json({ result: true, content: { simulatedDate }, error: [] });
+      const simulatedDate = process.env.SIMULATED_DATE || null;
+      res.status(200).json({
+        result: true,
+        content: { simulatedDate },
+        error: []
+      });
     } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getSimulatedDate"));
-      res.status(500).json({ result: false, content: [], error: [error.message] });
+      ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("getSimulatedDate"));
+      res.status(500).json({ result: false, content: [], error: ['Error al obtener fecha simulada'] });
     }
   };
 
-  // Establecer una nueva fecha simulada 
   static setSimulatedDate = async (req: Request, res: Response) => {
     try {
-      const { date } = req.body; // formato 'YYYY-MM-DD'
-      if (!date) return res.status(400).json({ result: false, content: [], error: ['Se requiere una fecha'] });
-
-      await Setting.upsert({
-        key: 'simulated_date',
-        value: date,
-        description: 'Fecha simulada para pruebas de cobros'
+      const { date } = req.body;
+      process.env.SIMULATED_DATE = date;
+      res.status(200).json({
+        result: true,
+        content: { simulatedDate: date },
+        error: []
       });
-
-      res.json({ result: true, content: { simulatedDate: date }, error: [] });
     } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("setSimulatedDate"));
-      res.status(500).json({ result: false, content: [], error: [error.message] });
+      ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("setSimulatedDate"));
+      res.status(500).json({ result: false, content: [], error: ['Error al establecer fecha simulada'] });
     }
   };
 
-  // Restablecer (eliminar) la fecha simulada → vuelve a usar la fecha real
-  static resetSimulatedDate = async (req: Request, res: Response) => {
+  static resetSimulatedDate = async (_req: Request, res: Response) => {
     try {
-      await Setting.destroy({ where: { key: 'simulated_date' } });
-      res.json({ result: true, content: { simulatedDate: null }, error: [] });
+      delete process.env.SIMULATED_DATE;
+      res.status(200).json({
+        result: true,
+        content: { simulatedDate: null },
+        error: []
+      });
     } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("resetSimulatedDate"));
-      res.status(500).json({ result: false, content: [], error: [error.message] });
+      ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("resetSimulatedDate"));
+      res.status(500).json({ result: false, content: [], error: ['Error al restablecer fecha simulada'] });
     }
   };
-  static applyMonthlyFees = async (req: Request, res: Response) => {
-  try {
-    await BillingService.applyMonthlyFee(); // Ya usa getCurrentDate() internamente
-    res.json({ result: true, content: { message: 'Mensualidades aplicadas correctamente' }, error: [] });
-  } catch (error: any) {
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("applyMonthlyFees"));
-    res.status(500).json({ result: false, content: [], error: [error.message] });
-  }
-};
+
+  static applyMonthlyFees = async (_req: Request, res: Response) => {
+    try {
+      await BillingService.applyMonthlyFee();
+      res.status(200).json({
+        result: true,
+        content: ['Mensualidades aplicadas correctamente'],
+        error: []
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("applyMonthlyFees"));
+      res.status(500).json({ result: false, content: [], error: ['Error al aplicar mensualidades'] });
+    }
+  };
+
+  // ─── REINICIO TOTAL DE DATOS (SOLO DESARROLLO) ──────────────────────
+  static resetEverything = async (_req: Request, res: Response) => {
+    // Bloquear en producción
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({
+        result: false,
+        content: [],
+        error: ['Esta acción no está disponible en producción']
+      });
+    }
+
+    const transaction = await sequelize.transaction();
+    try {
+      // 1. Eliminar transacciones (historial financiero)
+      await Transaction.destroy({ where: {}, transaction });
+
+      // 2. Restablecer estudiantes a pendiente, balance 0 y sin inscripción
+      await Student.update(
+        { status: 'pendiente', balance: 0, hasPaidInscription: false },
+        { where: {}, transaction }
+      );
+
+      // 3. Eliminar solicitudes de registro
+      await RegistrationApplication.destroy({ where: {}, transaction });
+
+      // 4. Eliminar representantes y usuarios asociados
+      await Representative.destroy({ where: {}, transaction });
+
+      // 5. Eliminar usuarios de nivel 1 (representantes)
+      await UserLogin.destroy({ where: { nivel: 1 }, transaction });
+
+      await transaction.commit();
+
+      res.status(200).json({
+        result: true,
+        content: ['Todos los datos de prueba han sido reiniciados'],
+        error: []
+      });
+    } catch (error: any) {
+      await transaction.rollback();
+      ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("resetEverything"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al reiniciar los datos']
+      });
+    }
+  };
 }

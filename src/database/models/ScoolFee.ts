@@ -1,12 +1,14 @@
-import { Table, Column, Model, DataType, AllowNull, PrimaryKey, IsUUID, Default, Unique } from "sequelize-typescript";
-import { typeSchoolFee } from "../types/SchoolFee";
+import {
+  Table, Column, Model, DataType, PrimaryKey,
+  IsUUID, Default, AllowNull, Length
+} from "sequelize-typescript";
 
 @Table({
-  tableName: 'school_fee',
+  tableName: 'ScoolFee',  // Ajusta si el nombre real es scool_fee
   freezeTableName: true,
   timestamps: true,
 })
-export default class SchoolFee extends Model<typeSchoolFee> {
+export default class SchoolFee extends Model {
   @IsUUID("all")
   @PrimaryKey
   @Default(DataType.UUIDV4)
@@ -14,43 +16,47 @@ export default class SchoolFee extends Model<typeSchoolFee> {
   declare id?: string;
 
   @AllowNull(false)
-  @Unique
   @Column({ type: DataType.STRING(20) })
-  declare schoolYear?: string;
+  declare schoolYear: string;
 
   @AllowNull(false)
-  @Column({ type: DataType.DECIMAL(10, 2) })
-  declare inscriptionFeeUSD?: number;
+  @Column({ type: DataType.DECIMAL(12, 2) })
+  declare inscriptionFeeUSD: number;
 
   @AllowNull(false)
-  @Column({ type: DataType.DECIMAL(10, 2) })
-  declare monthlyFeeUSD?: number;
+  @Column({ type: DataType.DECIMAL(12, 2) })
+  declare monthlyFeeUSD: number;
 
   @AllowNull(false)
-  @Column({ type: DataType.DECIMAL(10, 2) })
-  declare prontoPagoDiscount?: number;
+  @Column({ type: DataType.DECIMAL(12, 2) })
+  declare prontoPagoDiscount: number;
 
   @AllowNull(false)
   @Column({ type: DataType.INTEGER })
-  declare prontoPagoDeadlineDay?: number;
+  declare prontoPagoDeadlineDay: number;
 
   @AllowNull(false)
-  @Column({ type: DataType.DECIMAL(10, 2) })
-  declare administrativeFeeUSD?: number;
+  @Column({ type: DataType.DECIMAL(12, 2) })
+  declare administrativeFeeUSD: number;
 
   @AllowNull(false)
-  @Column({ type: DataType.DECIMAL(10, 2) })
-  declare august2027HalfPaymentUSD?: number;
-
-  @AllowNull(false)
-  @Column({ type: DataType.DATEONLY })
-  declare monthlyFeeStartDate?: string;
+  @Column({ type: DataType.DECIMAL(12, 2) })
+  declare august2027HalfPaymentUSD: number;
 
   @AllowNull(false)
   @Column({ type: DataType.DATEONLY })
-  declare inscriptionStartDate?: string;
+  declare monthlyFeeStartDate: string;
 
   @AllowNull(false)
   @Column({ type: DataType.DATEONLY })
-  declare inscriptionEndDate?: string;
+  declare inscriptionStartDate: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.DATEONLY })
+  declare inscriptionEndDate: string;
+
+  // ✅ NUEVO CAMPO
+  @AllowNull(true)
+  @Column({ type: DataType.DATEONLY })
+  declare schoolYearEndDate: string;
 }

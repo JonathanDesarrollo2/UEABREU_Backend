@@ -135,7 +135,7 @@ static adduser = async (req: Request, res: Response) => {
                                             }
                                         }
 
-                                        await Student.create({
+                                        const newStudent = await Student.create({
                                             fullName: studentData.fullName,
                                             identityCard: studentData.identityCard,
                                             birthDate: new Date(studentData.birthDate),
@@ -160,8 +160,15 @@ static adduser = async (req: Request, res: Response) => {
                                             section: studentData.section || 'Pendiente',
                                             balance: studentBalance
                                         }, { transaction });
+
+                                        // ✅ Aplicar cuotas según la fecha de ingreso
+                                        await BillingService.applyFeesBasedOnAdmission(
+                                            newStudent.id!,
+                                            newRepresentative.id!,
+                                            transaction  // usar la transacción actual
+                                        );
                                     } catch (studentError: any) {
-                                        console.error('Error creando estudiante:', studentError);
+                                        console.error('Error creando estudiante o aplicando cuotas:', studentError);
                                     }
                                 }
                             }
@@ -175,28 +182,6 @@ static adduser = async (req: Request, res: Response) => {
 
         // Confirmar transacción
         await transaction.commit();
-
-        // ✅ MODIFICACIÓN: Solo aplicar cuotas de inscripción SI NO estamos en 2026
-        const currentYear = new Date().getFullYear();
-        if (currentYear !== 2026 && newUser.nivel === 1 && newUser.userstatus && representativeData && studentsData && Array.isArray(studentsData)) {
-            const createdStudents = await Student.findAll({
-                where: { userId: newUser.id },
-            });
-
-            const representative = await Representative.findOne({
-                where: { userId: newUser.id },
-            });
-
-            if (representative && createdStudents.length > 0) {
-                for (const student of createdStudents) {
-                    try {
-                        await BillingService.applyInscriptionFees(student.id!, representative.id!, true);
-                    } catch (feeError) {
-                        console.error(`Error aplicando cuotas al estudiante ${student.id}:`, feeError);
-                    }
-                }
-            }
-        }
         
         res.status(200).json({ 
             result: true, 

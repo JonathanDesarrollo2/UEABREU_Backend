@@ -122,17 +122,15 @@ static activateApplication = async (req: Request, res: Response) => {
     await application.user.save({ transaction });
 
     // Solo los estudiantes con estado "pendiente" pasan a "regular" (no repitientes)
-    const [updatedRows] = await Student.update(
+    await Student.update(
       { status: "regular" },
       {
         where: { userId: application.userId, status: 'pendiente' },
         transaction,
       }
     );
-    console.log(`✅ ${updatedRows} estudiante(s) activado(s)`);
 
     // Asegurar que todos los estudiantes tengan fecha de admisión (si no la tienen)
-    // ✅ CORREGIDO: usar [Op.is]: null en lugar de null
     await Student.update(
       { admissionDate: new Date() },
       {
@@ -144,12 +142,7 @@ static activateApplication = async (req: Request, res: Response) => {
       }
     );
 
-    // Obtener tasa BCV una sola vez
-    const bcvRate = await BillingService.getCurrentBCVRate();
-
-    // Aplicar cargos de inscripción solo a estudiantes que:
-    // - están recién activados (status = "regular" y hasPaidInscription = false)
-    // - NO son repitientes
+    // Obtener todos los estudiantes recién activados
     const students = await Student.findAll({
       where: {
         userId: application.userId,
@@ -159,17 +152,13 @@ static activateApplication = async (req: Request, res: Response) => {
       transaction,
     });
 
+    // Aplicar cuotas según fecha de ingreso para cada estudiante
     for (const student of students) {
-      // Doble seguridad: no aplicar cargos a repitientes
-      if (student.status !== 'repitiente') {
-        await BillingService.applyInscriptionFeesWithTransaction(
-          student.id!,
-          application.representativeId!,
-          true,                     // isNewStudent = true
-          bcvRate,
-          transaction
-        );
-      }
+      await BillingService.applyFeesBasedOnAdmission(
+        student.id!,
+        application.representativeId!,
+        transaction
+      );
     }
 
     await transaction.commit();
