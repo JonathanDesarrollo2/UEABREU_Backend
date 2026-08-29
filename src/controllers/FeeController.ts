@@ -56,27 +56,22 @@ static updateFees = async (req: Request, res: Response) => {
     // Verificar o establecer contraseña administrativa
     let passwordRecord = await AdminPassword.findOne();
     if (!passwordRecord) {
-      // Primera vez: registrar la contraseña
       if (!password || password.length < 12) {
         return res.status(400).json({ result: false, content: [], error: ['Debes establecer una contraseña administrativa de al menos 12 caracteres'] });
       }
-      const saltRounds = 12;
-      const hash = await bcrypt.hash(password, saltRounds);
+      const hash = await bcrypt.hash(password, 12);
       passwordRecord = await AdminPassword.create({ passwordHash: hash });
-      console.log('🔐 Contraseña administrativa registrada por primera vez');
     } else {
-      // Ya existe: verificar
-      if (!password) {
-        return res.status(400).json({ result: false, content: [], error: ['Contraseña requerida para guardar cambios'] });
-      }
+      if (!password) return res.status(400).json({ result: false, content: [], error: ['Contraseña requerida'] });
       const match = await bcrypt.compare(password, passwordRecord.passwordHash);
-      if (!match) {
-        return res.status(403).json({ result: false, content: [], error: ['Contraseña incorrecta'] });
-      }
+      if (!match) return res.status(403).json({ result: false, content: [], error: ['Contraseña incorrecta'] });
     }
 
     const fee = await SchoolFee.findOne({ where: { schoolYear } });
     if (!fee) return res.status(404).json({ result: false, content: [], error: ['Año escolar no encontrado'] });
+
+    // 📸 Capturar valores antiguos
+    const oldFee = fee.toJSON();
 
     await fee.update({
       inscriptionFeeUSD,
@@ -91,13 +86,38 @@ static updateFees = async (req: Request, res: Response) => {
       schoolYearEndDate,
     });
 
-    // Registrar auditoría
+    // 📸 Capturar valores nuevos
+    const newFee = fee.toJSON();
+
+    // 🔍 Calcular solo los campos que cambiaron
+    const campos = [
+      'inscriptionFeeUSD',
+      'monthlyFeeUSD',
+      'prontoPagoDiscount',
+      'prontoPagoDeadlineDay',
+      'administrativeFeeUSD',
+      'august2027HalfPaymentUSD',
+      'monthlyFeeStartDate',
+      'inscriptionStartDate',
+      'inscriptionEndDate',
+      'schoolYearEndDate',
+    ];
+
+    const changes = campos
+      .filter(campo => oldFee[campo] !== newFee[campo])
+      .map(campo => ({
+        campo,
+        antes: oldFee[campo],
+        despues: newFee[campo],
+      }));
+
+    // Registrar auditoría con los cambios detallados
     await AuditLog.create({
       userId: req.tokenData?.id,
       action: 'UPDATE_SCHOOL_FEES',
       details: {
         schoolYear,
-        changes: fee.toJSON(),
+        changes,
         timestamp: new Date().toISOString(),
       },
     });
