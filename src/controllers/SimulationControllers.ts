@@ -72,50 +72,46 @@ export class SimulationController {
 
   // ─── REINICIO TOTAL DE DATOS (SOLO DESARROLLO) ──────────────────────
   static resetEverything = async (_req: Request, res: Response) => {
-  // ✅ Solo permitir si la simulación está habilitada (desarrollo/pruebas)
-  if (process.env.ENABLE_SIMULATION !== 'true') {
-    return res.status(403).json({
-      result: false,
-      content: [],
-      error: ['Esta acción no está disponible en producción']
-    });
-  }
+    if (process.env.ENABLE_SIMULATION !== 'true') {
+      return res.status(403).json({
+        result: false,
+        content: [],
+        error: ['Esta acción no está disponible en producción']
+      });
+    }
 
-  const transaction = await sequelize.transaction();
-  try {
-    // 1. Eliminar transacciones
-    await Transaction.destroy({ where: {}, transaction });
+    const transaction = await sequelize.transaction();
+    try {
+      // 1. Eliminar transacciones (historial financiero)
+      await Transaction.destroy({ where: {}, transaction });
 
-    // 2. Restablecer estudiantes a pendiente, balance 0 y sin inscripción
-    await Student.update(
-      { status: 'pendiente', balance: 0, hasPaidInscription: false },
-      { where: {}, transaction }
-    );
+      // 2. Eliminar solicitudes de registro
+      await RegistrationApplication.destroy({ where: {}, transaction });
 
-    // 3. Eliminar solicitudes de registro
-    await RegistrationApplication.destroy({ where: {}, transaction });
+      // 3. Eliminar estudiantes
+      await Student.destroy({ where: {}, transaction });
 
-    // 4. Eliminar representantes
-    await Representative.destroy({ where: {}, transaction });
+      // 4. Eliminar representantes
+      await Representative.destroy({ where: {}, transaction });
 
-    // 5. Eliminar usuarios de nivel 1 (representantes)
-    await UserLogin.destroy({ where: { nivel: 1 }, transaction });
+      // 5. Eliminar usuarios de nivel 1 (representantes)
+      await UserLogin.destroy({ where: { nivel: 1 }, transaction });
 
-    await transaction.commit();
+      await transaction.commit();
 
-    res.status(200).json({
-      result: true,
-      content: ['Todos los datos de prueba han sido reiniciados'],
-      error: []
-    });
-  } catch (error: any) {
-    await transaction.rollback();
-    ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("resetEverything"));
-    res.status(500).json({
-      result: false,
-      content: [],
-      error: ['Error al reiniciar los datos']
-    });
-  }
-};
+      res.status(200).json({
+        result: true,
+        content: ['Todos los datos de prueba han sido reiniciados'],
+        error: []
+      });
+    } catch (error: any) {
+      await transaction.rollback();
+      ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("resetEverything"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al reiniciar los datos']
+      });
+    }
+  };
 }
