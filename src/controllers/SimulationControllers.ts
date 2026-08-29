@@ -70,8 +70,9 @@ export class SimulationController {
     }
   };
 
-  // ─── REINICIO TOTAL DE DATOS (SOLO DESARROLLO) ──────────────────────
+  // ─── REINICIO TOTAL DE DATOS (SOLO DESARROLLO, SIN BORRAR USUARIOS) ──
   static resetEverything = async (_req: Request, res: Response) => {
+    // Solo permitir si la simulación está habilitada
     if (process.env.ENABLE_SIMULATION !== 'true') {
       return res.status(403).json({
         result: false,
@@ -82,26 +83,26 @@ export class SimulationController {
 
     const transaction = await sequelize.transaction();
     try {
-      // 1. Eliminar transacciones (historial financiero)
+      // 1. Eliminar transacciones financieras (historial)
       await Transaction.destroy({ where: {}, transaction });
 
-      // 2. Eliminar solicitudes de registro
-      await RegistrationApplication.destroy({ where: {}, transaction });
+      // 2. Restaurar estudiantes a pendiente, sin balance y sin inscripción pagada
+      await Student.update(
+        { status: 'pendiente', balance: 0, hasPaidInscription: false },
+        { where: {}, transaction }
+      );
 
-      // 3. Eliminar estudiantes
-      await Student.destroy({ where: {}, transaction });
-
-      // 4. Eliminar representantes
-      await Representative.destroy({ where: {}, transaction });
-
-      // 5. Eliminar usuarios de nivel 1 (representantes)
-      await UserLogin.destroy({ where: { nivel: 1 }, transaction });
+      // 3. Desactivar cuentas de representantes (nivel 1)
+      await UserLogin.update(
+        { userstatus: false },
+        { where: { nivel: 1 }, transaction }
+      );
 
       await transaction.commit();
 
       res.status(200).json({
         result: true,
-        content: ['Todos los datos de prueba han sido reiniciados'],
+        content: ['Datos de prueba reiniciados correctamente'],
         error: []
       });
     } catch (error: any) {
