@@ -89,7 +89,16 @@ static updateFees = async (req: Request, res: Response) => {
     // 📸 Capturar valores nuevos
     const newFee = fee.toJSON();
 
-    // 🔍 Calcular solo los campos que cambiaron
+    // 🔍 Función para normalizar valores antes de comparar
+    const normalize = (valor: any): string => {
+      if (valor === null || valor === undefined) return '';
+      const num = Number(valor);
+      if (!isNaN(num) && String(valor).trim() !== '' && typeof valor !== 'boolean') {
+        return num.toString();
+      }
+      return String(valor).trim();
+    };
+
     const campos = [
       'inscriptionFeeUSD',
       'monthlyFeeUSD',
@@ -104,25 +113,31 @@ static updateFees = async (req: Request, res: Response) => {
     ];
 
     const changes = campos
-      .filter(campo => oldFee[campo] !== newFee[campo])
+      .filter(campo => normalize(oldFee[campo]) !== normalize(newFee[campo]))
       .map(campo => ({
         campo,
         antes: oldFee[campo],
         despues: newFee[campo],
       }));
 
-    // Registrar auditoría con los cambios detallados
-    await AuditLog.create({
-      userId: req.tokenData?.id,
-      action: 'UPDATE_SCHOOL_FEES',
-      details: {
-        schoolYear,
-        changes,
-        timestamp: new Date().toISOString(),
-      },
-    });
+    // ✅ Solo registrar si hubo cambios reales
+    if (changes.length > 0) {
+      await AuditLog.create({
+        userId: req.tokenData?.id,
+        action: 'UPDATE_SCHOOL_FEES',
+        details: {
+          schoolYear,
+          changes,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
 
-    res.json({ result: true, content: fee, error: [] });
+    res.json({
+      result: true,
+      content: fee,
+      error: [],
+    });
   } catch (error: any) {
     ErrorLog.createErrorLog(error, 'FeeController', getErrorLocation("updateFees"));
     res.status(500).json({ result: false, content: [], error: [error.message] });
