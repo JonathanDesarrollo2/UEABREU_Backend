@@ -5,6 +5,7 @@ import SchoolFee from "../database/models/ScoolFee";
 import AuditLog from "../database/models/auditLog";
 import AdminPassword from "../database/models/AdminPassword";
 import bcrypt from 'bcrypt';
+import UserLogin from "../database/models/userlogin";
 
 export class FeeController {
   // Obtener las tarifas del año activo (o crear una por defecto)
@@ -48,18 +49,30 @@ static updateFees = async (req: Request, res: Response) => {
       monthlyFeeStartDate,
       inscriptionStartDate,
       inscriptionEndDate,
-      schoolYearEndDate,   // ✅ Nuevo campo
-      password,            // ✅ Contraseña requerida
+      schoolYearEndDate,
+      password,
     } = req.body;
 
-    // Verificar contraseña administrativa
-    const passwordRecord = await AdminPassword.findOne();
+    // Verificar o establecer contraseña administrativa
+    let passwordRecord = await AdminPassword.findOne();
     if (!passwordRecord) {
-      return res.status(400).json({ result: false, content: [], error: ['No hay contraseña administrativa configurada'] });
-    }
-    const match = await bcrypt.compare(password, passwordRecord.passwordHash);
-    if (!match) {
-      return res.status(403).json({ result: false, content: [], error: ['Contraseña incorrecta'] });
+      // Primera vez: registrar la contraseña
+      if (!password || password.length < 12) {
+        return res.status(400).json({ result: false, content: [], error: ['Debes establecer una contraseña administrativa de al menos 12 caracteres'] });
+      }
+      const saltRounds = 12;
+      const hash = await bcrypt.hash(password, saltRounds);
+      passwordRecord = await AdminPassword.create({ passwordHash: hash });
+      console.log('🔐 Contraseña administrativa registrada por primera vez');
+    } else {
+      // Ya existe: verificar
+      if (!password) {
+        return res.status(400).json({ result: false, content: [], error: ['Contraseña requerida para guardar cambios'] });
+      }
+      const match = await bcrypt.compare(password, passwordRecord.passwordHash);
+      if (!match) {
+        return res.status(403).json({ result: false, content: [], error: ['Contraseña incorrecta'] });
+      }
     }
 
     const fee = await SchoolFee.findOne({ where: { schoolYear } });
@@ -75,7 +88,7 @@ static updateFees = async (req: Request, res: Response) => {
       monthlyFeeStartDate,
       inscriptionStartDate,
       inscriptionEndDate,
-      schoolYearEndDate, // ✅
+      schoolYearEndDate,
     });
 
     // Registrar auditoría
@@ -92,6 +105,22 @@ static updateFees = async (req: Request, res: Response) => {
     res.json({ result: true, content: fee, error: [] });
   } catch (error: any) {
     ErrorLog.createErrorLog(error, 'FeeController', getErrorLocation("updateFees"));
+    res.status(500).json({ result: false, content: [], error: [error.message] });
+  }
+};
+static getAuditLogs = async (req: Request, res: Response) => {
+  try {
+    const logs = await AuditLog.findAll({
+      order: [['createdAt', 'DESC']],
+      limit: 20,
+      include: [{
+        model: UserLogin,
+        attributes: ['userlogin', 'username']
+      }]
+    });
+    res.json({ result: true, content: logs, error: [] });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'FeeController', getErrorLocation("getAuditLogs"));
     res.status(500).json({ result: false, content: [], error: [error.message] });
   }
 };
