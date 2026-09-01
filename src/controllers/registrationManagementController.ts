@@ -9,6 +9,7 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import { Op } from "sequelize";
 import { BillingService } from "../services/billingServices";
+import { getCurrentDate } from "../utility/dateHelper";
 
 export class RegistrationManagementController {
 
@@ -130,13 +131,14 @@ static activateApplication = async (req: Request, res: Response) => {
       }
     );
 
-    // Asegurar que todos los estudiantes tengan fecha de admisión (si no la tienen)
+    // ✅ Asignar fecha de admisión = fecha actual/simulada al activar la cuenta
     await Student.update(
-      { admissionDate: new Date() },
+      { admissionDate: await getCurrentDate() },
       {
         where: {
           userId: application.userId,
-          admissionDate: null as any
+          status: 'regular',
+          hasPaidInscription: false,
         },
         transaction,
       }
@@ -174,7 +176,6 @@ static activateApplication = async (req: Request, res: Response) => {
     res.status(500).json({ result: false, content: [], error: ["Error al activar la cuenta"] });
   }
 };
-
   // Eliminar completamente el registro
   // Reemplaza el método deleteApplication en RegistrationManagementController.ts
 static deleteApplication = async (req: Request, res: Response) => {

@@ -170,7 +170,6 @@ export class PublicController {
             status: 'pendiente',
             currentGrade: student.currentGrade || 'En asignar',
             section: student.section || 'Pendiente',
-            admissionDate: new Date(),
             initialSchoolYear: new Date().getFullYear().toString(),
             balance: 0
           }, { transaction });
