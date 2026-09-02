@@ -529,12 +529,12 @@ static adduser = async (req: Request, res: Response) => {
         try {
             type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
             type OrderDirection = 'ASC' | 'DESC';
-            
+
             type FieldConfig = {
-                [key: number]: {
-                    field: FieldKeys | 'createdAt';
-                    orderDirection: OrderDirection;
-                };
+            [key: number]: {
+                field: FieldKeys | 'createdAt';
+                orderDirection: OrderDirection;
+            };
             };
 
             const page = parseInt(req.query.page as string, 10) || 1;
@@ -545,133 +545,159 @@ static adduser = async (req: Request, res: Response) => {
             const offset = (page - 1) * limit;
 
             const fieldConfig: FieldConfig = {
-                1: { field: 'usermail', orderDirection: 'ASC' },
-                2: { field: 'userlogin', orderDirection: 'ASC' },
-                3: { field: 'username', orderDirection: 'ASC' },
-                4: { field: 'createdAt', orderDirection: 'DESC' }
+            1: { field: 'usermail', orderDirection: 'ASC' },
+            2: { field: 'userlogin', orderDirection: 'ASC' },
+            3: { field: 'username', orderDirection: 'ASC' },
+            4: { field: 'createdAt', orderDirection: 'DESC' }
             };
 
-            const config = fieldConfig[idBus] || { 
-                field: 'createdAt' as const, 
-                orderDirection: 'DESC' as OrderDirection 
+            const config = fieldConfig[idBus] || {
+            field: 'createdAt' as const,
+            orderDirection: 'DESC' as OrderDirection
             };
 
-            // Construir opciones de consulta PRINCIPAL
             const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
-                limit,
-                offset,
-                attributes: { exclude: ['userpass'] },
+            limit,
+            offset,
+            attributes: { exclude: ['userpass'] },
+            include: [
+                {
+                model: Representative,
+                as: 'representative',
+                required: false,
                 include: [
                     {
-                        model: Representative,
-                        as: 'representative',
-                        required: false,
-                        include: [
-                            {
-                                model: Student,
-                                as: 'students',
-                                required: false,
-                                attributes: [
-                                    'id', 'fullName', 'identityCard', 'birthDate', 'status', 
-                                    'emergencyContact', 'emergencyPhone', 'currentGrade', 'section',
-                                    'balance', 'admissionDate'
-                                ]
-                            }
-                        ]
+                    model: Student,
+                    as: 'students',
+                    required: false,
+                    attributes: [
+                                'id', 'fullName', 'identityCard', 'birthDate', 'status',
+                                'currentGrade', 'section', 'createdAt', 'balance',
+                                'exonerationPercent', 'admissionDate', 'representativeId', 'userId' // ✅ Añadido
+                    ]
                     }
                 ]
+                }
+            ]
             };
 
             queryOptions.order = [[config.field, config.orderDirection]];
-            
-            // Construir condiciones de búsqueda
+
             const whereConditions: any = {};
-            
-            // Filtrar por nivel si no es 'all'
+
             if (nivelFilter !== 'all') {
-                whereConditions.nivel = nivelFilter;
+            whereConditions.nivel = nivelFilter;
             }
-            
-            // Agregar búsqueda por texto
+
             if (DeBus) {
-                whereConditions[Op.or] = [
-                    { usermail: { [Op.iLike]: `%${DeBus}%` } },
-                    { userlogin: { [Op.iLike]: `%${DeBus}%` } },
-                    { username: { [Op.iLike]: `%${DeBus}%` } }
-                ];
-                
-                // Para representantes, también buscar en representante y cédula
-                if (nivelFilter === '1' || nivelFilter === 'all') {
-                    const repCondition = {
-                        model: Representative,
-                        as: 'representative',
-                        required: false,
-                        where: {
-                            [Op.or]: [
-                                { fullName: { [Op.iLike]: `%${DeBus}%` } },
-                                { identityCard: { [Op.iLike]: `%${DeBus}%` } }
-                            ]
-                        }
-                    };
-                    
-                    if (!queryOptions.include) queryOptions.include = [];
-                    const existingInclude = queryOptions.include as any[];
-                    
-                    const repIndex = existingInclude.findIndex((inc: any) => inc.as === 'representative');
-                    if (repIndex !== -1) {
-                        existingInclude[repIndex] = repCondition;
-                    }
-                }
+            whereConditions[Op.or] = [
+                { usermail: { [Op.iLike]: `%${DeBus}%` } },
+                { userlogin: { [Op.iLike]: `%${DeBus}%` } },
+                { username: { [Op.iLike]: `%${DeBus}%` } },
+                // ✅ Búsqueda en representante sin importar nivel
+                { '$representative.fullName$': { [Op.iLike]: `%${DeBus}%` } },
+                { '$representative.identityCard$': { [Op.iLike]: `%${DeBus}%` } }
+            ];
             }
-            
+
             if (Object.keys(whereConditions).length > 0) {
-                queryOptions.where = whereConditions;
+            queryOptions.where = whereConditions;
             }
 
-            // Ejecutar la consulta principal
-            const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
+            // Primero obtenemos el total de registros
+            const count = await UserLogin.count({
+            where: queryOptions.where,
+            include: queryOptions.include,
+            distinct: true,
+            });
 
-            // ✅ Transformar la respuesta para incluir el balance total del representante
+            // Ajustar página si se excede
+            let currentPage = page;
+            let finalOffset = offset;
+            const totalPages = Math.ceil(count / limit);
+
+            if (currentPage > totalPages && totalPages > 0) {
+            currentPage = totalPages;
+            finalOffset = (currentPage - 1) * limit;
+            }
+
+            // Obtener datos con offset corregido
+            const rows = await UserLogin.findAll({
+            ...queryOptions,
+            offset: finalOffset,
+            });
+
+            // Transformar respuesta
             const transformedRows = rows.map(user => {
-                const userJson = user.toJSON() as any;
-                if (userJson.representative && userJson.representative.students) {
-                    const totalBalance = userJson.representative.students.reduce(
-                        (sum: number, student: any) => sum + (student.balance || 0), 
-                        0
-                    );
-                    // Agregar balance calculado al objeto representative
-                    userJson.representative.balance = totalBalance;
-                    userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
-                        style: 'currency',
-                        currency: 'USD',
-                        minimumFractionDigits: 2
-                    }).format(totalBalance);
-                    userJson.representative.balanceStatus = totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
-                }
-                return userJson;
+            const userJson = user.toJSON() as any;
+            if (userJson.representative && userJson.representative.students) {
+                const totalBalance = userJson.representative.students.reduce(
+                (sum: number, student: any) => sum + (student.balance || 0),
+                0
+                );
+                userJson.representative.balance = totalBalance;
+                userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2
+                }).format(totalBalance);
+                userJson.representative.balanceStatus =
+                totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
+            }
+            return userJson;
             });
 
             res.status(200).json({
-                result: true,
-                content: transformedRows,
-                pagination: {
-                    totalRecords: count,
-                    currentPage: page,
-                    totalPages: Math.ceil(count / limit),
-                },
-                error: []
+            result: true,
+            content: transformedRows,
+            pagination: {
+                totalRecords: count,
+                currentPage: currentPage,
+                totalPages: totalPages,
+            },
+            error: []
             });
-
         } catch (error: any) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
-            res.status(500).json({ 
-                result: false, 
-                content: [], 
-                error: ['Error al obtener usuarios'] 
+            res.status(500).json({
+            result: false,
+            content: [],
+            error: ['Error al obtener usuarios']
             });
         }
-    }
+        }
     //#endregion
+    private static formatPaginatedResponse(rows: any[], count: number, currentPage: number, limit: number, res: Response) {
+        const totalPages = Math.ceil(count / limit);
+        const transformedRows = rows.map(user => {
+            const userJson = user.toJSON ? user.toJSON() : user;
+            if (userJson.representative && userJson.representative.students) {
+            const totalBalance = userJson.representative.students.reduce(
+                (sum: number, student: any) => sum + (student.balance || 0), 
+                0
+            );
+            userJson.representative.balance = totalBalance;
+            userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2
+            }).format(totalBalance);
+            userJson.representative.balanceStatus = totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
+            }
+            return userJson;
+        });
+
+        res.status(200).json({
+            result: true,
+            content: transformedRows,
+            pagination: {
+            totalRecords: count,
+            currentPage: currentPage,
+            totalPages: totalPages,
+            },
+            error: []
+        });
+        }
 
     //#region: Iniciar Sesion post('/privateauth')
     static SesionIn = async (req: Request, res: Response) => {
@@ -1006,61 +1032,63 @@ static adduser = async (req: Request, res: Response) => {
     
     //#region: Obtener lista de estudiantes (para dashboard)
     static listStudents = async (req: Request, res: Response) => {
-    try {
-        const { page = 1, limit = 100, status, search } = req.query;
-        const offset = (Number(page) - 1) * Number(limit);
-        
-        const where: any = {};
-        
-        if (status) {
-            where.status = status;
-        }
-        
-        if (search && typeof search === 'string') {
-            where[Op.or] = [
-                { fullName: { [Op.iLike]: `%${search}%` } },
-                { identityCard: { [Op.iLike]: `%${search}%` } },
-                { currentGrade: { [Op.iLike]: `%${search}%` } }
-            ];
-        }
-        
-        const { count, rows: students } = await Student.findAndCountAll({
-            where,
-            limit: Number(limit),
-            offset,
-            order: [['fullName', 'ASC']],
-            // ✅ Añadido representativeId explícitamente
-            attributes: [
-                'id', 'fullName', 'identityCard', 'birthDate', 'status',
-                'currentGrade', 'section', 'createdAt', 'balance',
-                'exonerationPercent', 'admissionDate', 'representativeId'  // ← CLAVE
-            ],
-            include: [{
-                model: Representative,
-                as: 'representative',
-                attributes: ['id', 'fullName', 'identityCard']
-            }]
-        });
-        
-        res.status(200).json({
-            result: true,
-            content: students,
-            pagination: {
-                totalRecords: count,
-                currentPage: Number(page),
-                totalPages: Math.ceil(count / Number(limit)),
-            },
-            error: []
-        });
-        
-    } catch (error: any) {
-        ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
-        res.status(500).json({ 
-            result: false, 
-            content: [], 
-            error: ['Error al obtener estudiantes'] 
-        });
+  try {
+    const { page = 1, limit = 100, status, search } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const where: any = {};
+
+    if (status) {
+      where.status = status;
     }
+
+    if (search && typeof search === 'string') {
+      where[Op.or] = [
+        { fullName: { [Op.iLike]: `%${search}%` } },
+        { identityCard: { [Op.iLike]: `%${search}%` } },
+        { currentGrade: { [Op.iLike]: `%${search}%` } },
+        // ✅ Búsqueda por nombre o cédula del representante
+        { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
+        { '$representative.identityCard$': { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    const { count, rows: students } = await Student.findAndCountAll({
+      where,
+      limit: Number(limit),
+      offset,
+      order: [['fullName', 'ASC']],
+      attributes: [
+            'id', 'fullName', 'identityCard', 'birthDate', 'status',
+            'currentGrade', 'section', 'createdAt', 'balance',
+            'exonerationPercent', 'admissionDate', 'representativeId', 'userId' // ✅ Añadido
+      ],
+      include: [{
+        model: Representative,
+        as: 'representative',
+        attributes: ['id', 'fullName', 'identityCard']
+      }]
+    });
+
+    res.status(200).json({
+      result: true,
+      content: students,
+      pagination: {
+        totalRecords: count,
+        currentPage: Number(page),
+        totalPages: Math.ceil(count / Number(limit)),
+      },
+      error: []
+    });
+
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
+    res.status(500).json({ 
+      result: false, 
+      content: [], 
+      error: ['Error al obtener estudiantes'] 
+    });
+  }
 };
     //#endregion
     
@@ -1208,6 +1236,29 @@ static impersonate = async (req: Request, res: Response) => {
       content: [],
       error: ['Error al suplantar usuario']
     });
+  }
+};
+static getUserById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = await UserLogin.findByPk(id, {
+      include: [
+        {
+          model: Representative,
+          as: 'representative',
+          include: [{ model: Student, as: 'students' }],
+        },
+      ],
+    });
+
+    if (!user) {
+      return res.status(404).json({ result: false, content: [], error: ['Usuario no encontrado'] });
+    }
+
+    res.json({ result: true, content: user, error: [] });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getUserById"));
+    res.status(500).json({ result: false, content: [], error: ['Error al obtener usuario'] });
   }
 };
 }

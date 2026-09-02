@@ -203,4 +203,11 @@ RouterUser.get('/admin-password/status',
   authsession,
   AdminPasswordController.checkPasswordStatus
 );
+
+RouterUser.get('/:id',
+  authsession,
+  param('id').isUUID().withMessage('ID inválido'),
+  validateRoutes,
+  User.getUserById
+);
 export default RouterUser;

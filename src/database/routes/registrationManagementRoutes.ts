@@ -54,4 +54,12 @@ RegistrationManagementRouter.get(
   validateRoutes,
   RegistrationManagementController.getApplicationData
 );
+
+RegistrationManagementRouter.put(
+  "/:id/update",
+  authsession,
+  param("id").isUUID().withMessage("ID inválido"),
+  validateRoutes,
+  RegistrationManagementController.updateApplication
+);
 export default RegistrationManagementRouter;

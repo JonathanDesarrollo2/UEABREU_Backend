@@ -636,136 +636,119 @@ export class ScheduleController {
     }
   };
 
-  static getChildrenSchedules = async (req: Request, res: Response) => {
+static getChildrenSchedules = async (req: Request, res: Response) => {
   try {
-    const tokenData = req.tokenData;
-    if (!tokenData?.id) {
-      return res.status(401).json({ result: false, content: [], error: ['Autenticación requerida'] });
+    const userId = req.tokenData?.id;
+    if (!userId) {
+      return res.status(401).json({ result: false, content: [], error: ['No autenticado'] });
     }
 
-    // 1. Buscar el representante asociado al usuario
     const representative = await Representative.findOne({
-      where: { userId: tokenData.id },
-      include: [{
-        model: Student,
-        as: 'students',
-        attributes: ['id', 'fullName', 'currentGrade', 'section', 'status']
-      }]
+      where: { userId },
+      include: [{ model: Student, as: 'students' }],
     });
 
-    if (!representative || !representative.students || representative.students.length === 0) {
-      return res.status(200).json({ result: true, content: [], error: [] });
+    if (!representative) {
+      return res.status(404).json({ result: false, content: [], error: ['No se encontró representante'] });
     }
 
-    // 2. Para cada estudiante, obtener el horario general de su grado y sección
-    const result = await Promise.all(
-      representative.students.map(async (student) => {
-        const grade = student.currentGrade;
-        const section = student.section;
-        if (!grade || !section) {
-          return {
-            studentId: student.id,
-            studentName: student.fullName,
-            grade: grade || 'Sin asignar',
-            section: section || 'Sin asignar',
-            schedulesByDay: {},
-            blockTimesByDay: {}
-          };
-        }
+    const students = representative.students || [];
+    if (students.length === 0) {
+      return res.json({ result: true, content: [], error: [] });
+    }
 
-        // Obtener horarios del grado/sección
-        const schedules = await Schedule.findAll({
-          where: { grade, section },
-          include: [
-            {
-              model: Subject,
-              as: 'subject',
-              include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName'] }]
-            },
-            { model: Teacher, as: 'teacher', attributes: ['id', 'fullName'] }
-          ],
-          order: [['day', 'ASC'], ['startBlock', 'ASC']]
-        });
+    const result = [];
 
-        // Obtener configuración de bloques por día
-        const days = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'];
-        const blockTimesByDay: Record<string, any[]> = {};
-        for (const day of days) {
-          const config = await BlockTimeConfig.findAll({
-            where: { grade, section, day, isActive: true },
-            order: [['blockNumber', 'ASC']]
-          });
-          blockTimesByDay[day] = config.length > 0
-            ? config.map(c => ({ blockNumber: c.blockNumber, startTime: c.startTime, endTime: c.endTime, isActive: c.isActive }))
-            : DEFAULT_BLOCK_TIMES.filter(b => b.isActive);
-        }
-
-        // Construir schedulesByDay similar al de getSchedulesByGradeSection
-        const schedulesByDay: any = { lunes: [], martes: [], miercoles: [], jueves: [], viernes: [] };
-        
-        // Inicializar todos los bloques (según blockTimesByDay)
-        for (const day of days) {
-          const blocksForDay = blockTimesByDay[day];
-          schedulesByDay[day] = blocksForDay.map(block => ({
-            blockId: block.blockNumber,
-            time: `${block.startTime} - ${block.endTime}`,
-            period: getPeriodName(block.blockNumber),
-            isBreak: false,
-            isOccupied: false,
-            subject: null,
-            teacher: null,
-            scheduleId: null,
-            spans: 1
-          }));
-        }
-
-        // Asignar horarios a los bloques correspondientes
-        for (const schedule of schedules) {
-          const day = schedule.day;
-          if (!day || !schedulesByDay[day]) continue;
-          
-          const startBlock = schedule.startBlock;
-          const endBlock = schedule.endBlock;
-          const isRecess = !schedule.subjectId;
-          const spans = isRecess ? 1 : 2;
-          
-          const blockIndex = schedulesByDay[day].findIndex((b: any) => b.blockId === startBlock);
-          if (blockIndex !== -1) {
-            schedulesByDay[day][blockIndex] = {
-              ...schedulesByDay[day][blockIndex],
-              subject: isRecess ? "RECESO" : schedule.subject?.name,
-              subjectCode: schedule.subject?.code,
-              teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
-              classroom: schedule.classroom,
-              scheduleId: schedule.id,
-              spans: spans,
-              isBreak: isRecess
-            };
-            if (!isRecess && spans === 2 && blockIndex + 1 < schedulesByDay[day].length) {
-              schedulesByDay[day][blockIndex + 1] = {
-                ...schedulesByDay[day][blockIndex + 1],
-                isOccupied: true,
-                occupiedBy: schedule.id
-              };
-            }
+    for (const student of students) {
+      const studentSchedules = await StudentSchedule.findAll({
+        where: { studentId: student.id },
+        include: [
+          {
+            model: Schedule,
+            as: 'schedule',
+            include: [
+              {
+                model: Subject,
+                as: 'subject',
+                include: [{
+                  model: Teacher,
+                  as: 'teacher',
+                  attributes: ['id', 'fullName', 'email']
+                }]
+              },
+              {
+                model: Teacher,
+                as: 'teacher',
+                attributes: ['id', 'fullName', 'email']
+              }
+            ]
           }
-        }
+        ],
+        order: [
+          [{ model: Schedule, as: 'schedule' }, 'day', 'ASC'],
+          [{ model: Schedule, as: 'schedule' }, 'startBlock', 'ASC']
+        ]
+      });
 
-        return {
-          studentId: student.id,
-          studentName: student.fullName,
-          grade,
-          section,
-          schedulesByDay,
-          blockTimesByDay
-        };
-      })
-    );
+      const schedulesByDay: Record<string, any[]> = {};
+      const blockTimesByDay: Record<string, any[]> = {};
 
-    res.status(200).json({ result: true, content: result, error: [] });
+      for (const ss of studentSchedules) {
+      const schedule = ss.schedule;
+      // ✅ Validar que exista y que los campos usados como índice no sean undefined
+      if (!schedule || !schedule.day || !schedule.startBlock || !schedule.endBlock) continue;
+
+      const day = schedule.day;
+      const startBlock = schedule.startBlock;
+      const endBlock = schedule.endBlock;
+
+      if (!schedulesByDay[day]) schedulesByDay[day] = [];
+      schedulesByDay[day].push({
+        blockId: startBlock,
+        time: `${startBlock}-${endBlock}`,
+        period: '',
+        isBreak: false,
+        isOccupied: false,
+        subject: schedule.subject?.name,
+        subjectCode: schedule.subject?.code,
+        teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
+        classroom: schedule.classroom,
+        spans: endBlock - startBlock + 1,
+      });
+
+      if (!blockTimesByDay[day]) {
+        const blocks = await BlockTimeConfig.findAll({
+          where: {
+            grade: schedule.grade || student.currentGrade || '',
+            section: schedule.section || student.section || '',
+            day: day,
+            isActive: true,
+          },
+          order: [['blockNumber', 'ASC']],
+        });
+        blockTimesByDay[day] = blocks.map(b => ({
+          blockNumber: b.blockNumber,
+          startTime: b.startTime ? String(b.startTime) : '',   // ✅ Convertir a string
+          endTime: b.endTime ? String(b.endTime) : '',
+          isActive: b.isActive,
+        }));
+      }
+    }
+
+      result.push({
+        studentId: student.id,
+        studentName: student.fullName,
+        grade: student.currentGrade || '',
+        section: student.section || '',
+        schedulesByDay,
+        blockTimesByDay,
+      });
+    }
+
+    res.json({ result: true, content: result, error: [] });
   } catch (error: any) {
     ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getChildrenSchedules"));
-    res.status(500).json({ result: false, content: [], error: [`Error al obtener horarios: ${error.message}`] });
+    res.status(500).json({ result: false, content: [], error: ['Error al obtener horarios de hijos'] });
   }
 };
 
