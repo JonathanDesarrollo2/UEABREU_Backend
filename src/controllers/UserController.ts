@@ -21,8 +21,14 @@ const getTotalBalance = async (representativeId: string): Promise<number> => {
   return students.reduce((sum, s) => sum + (s.balance || 0), 0);
 };
 
+
+
 export class User {
     //#region: Crear usuarios Nuevos post('/adduser')
+    private static async convertBsToUSD(amountBs: number): Promise<number> {
+    const bcvRate = await BillingService.getCurrentBCVRate();
+    return amountBs / bcvRate;
+    }
     //#region: Crear usuarios Nuevos post('/adduser')
 static adduser = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
@@ -109,7 +115,9 @@ static adduser = async (req: Request, res: Response) => {
                         // CREAR ESTUDIANTES con balance individual y fecha de ingreso
                         if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
                             const initialBalance = representativeData.initialBalance || 0;
-                            const perStudentBalance = studentsData.length > 0 ? initialBalance / studentsData.length : 0;
+                            // ✅ Convertir saldo inicial a USD
+                            const initialBalanceUSD = initialBalance > 0 ? await User.convertBsToUSD(initialBalance) : 0;
+                            const perStudentBalanceUSD = studentsData.length > 0 ? initialBalanceUSD / studentsData.length : 0;
 
                             for (const studentData of studentsData) {
                                 if (!studentData.identityCard || !studentData.fullName) {
@@ -123,7 +131,14 @@ static adduser = async (req: Request, res: Response) => {
                                 
                                 if (!existingStudent) {
                                     try {
-                                        const studentBalance = studentData.balance !== undefined ? studentData.balance : perStudentBalance;
+                                        // ✅ Determinar balance en USD
+                                        let studentBalanceUSD: number;
+                                        if (studentData.balance !== undefined) {
+                                            // Si viene balance, asumimos que está en Bs y lo convertimos
+                                            studentBalanceUSD = await User.convertBsToUSD(studentData.balance);
+                                        } else {
+                                            studentBalanceUSD = perStudentBalanceUSD;
+                                        }
                                         
                                         // ✅ Cast para admitir admissionDate
                                         const typedStudentData = studentData as any;
@@ -158,7 +173,7 @@ static adduser = async (req: Request, res: Response) => {
                                             initialSchoolYear: new Date().getFullYear().toString(),
                                             currentGrade: studentData.currentGrade || 'En asignar',
                                             section: studentData.section || 'Pendiente',
-                                            balance: studentBalance
+                                            balance: studentBalanceUSD  // ✅ en USD
                                         }, { transaction });
 
                                         // ✅ Aplicar cuotas según la fecha de ingreso
