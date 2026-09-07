@@ -551,12 +551,11 @@ static updatelogin = async (req: Request, res: Response) => {
         try {
             type FieldKeys = 'usermail' | 'userlogin' | 'username' | 'createdAt';
             type OrderDirection = 'ASC' | 'DESC';
-
             type FieldConfig = {
-            [key: number]: {
-                field: FieldKeys | 'createdAt';
-                orderDirection: OrderDirection;
-            };
+                [key: number]: {
+                    field: FieldKeys | 'createdAt';
+                    orderDirection: OrderDirection;
+                };
             };
 
             const page = parseInt(req.query.page as string, 10) || 1;
@@ -567,127 +566,115 @@ static updatelogin = async (req: Request, res: Response) => {
             const offset = (page - 1) * limit;
 
             const fieldConfig: FieldConfig = {
-            1: { field: 'usermail', orderDirection: 'ASC' },
-            2: { field: 'userlogin', orderDirection: 'ASC' },
-            3: { field: 'username', orderDirection: 'ASC' },
-            4: { field: 'createdAt', orderDirection: 'DESC' }
+                1: { field: 'usermail', orderDirection: 'ASC' },
+                2: { field: 'userlogin', orderDirection: 'ASC' },
+                3: { field: 'username', orderDirection: 'ASC' },
+                4: { field: 'createdAt', orderDirection: 'DESC' }
             };
 
             const config = fieldConfig[idBus] || {
-            field: 'createdAt' as const,
-            orderDirection: 'DESC' as OrderDirection
+                field: 'createdAt' as const,
+                orderDirection: 'DESC' as OrderDirection
             };
 
-            const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
-            limit,
-            offset,
-            attributes: { exclude: ['userpass'] },
-            include: [
-                {
-                model: Representative,
-                as: 'representative',
-                required: false,
-                include: [
-                    {
-                    model: Student,
-                    as: 'students',
-                    required: false,
-                    attributes: [
-                                'id', 'fullName', 'identityCard', 'birthDate', 'status',
-                                'currentGrade', 'section', 'createdAt', 'balance',
-                                'exonerationPercent', 'admissionDate', 'representativeId', 'userId' // ✅ Añadido
-                    ]
-                    }
-                ]
-                }
-            ]
-            };
-
-            queryOptions.order = [[config.field, config.orderDirection]];
-
+            // Construir where principal
             const whereConditions: any = {};
 
             if (nivelFilter !== 'all') {
-            whereConditions.nivel = nivelFilter;
+                const nivelNum = parseInt(nivelFilter, 10);
+                if (!isNaN(nivelNum)) {
+                    whereConditions.nivel = nivelNum;
+                }
             }
 
+            // Si hay búsqueda, aplicarla en el include de representante
+            let representativeWhere: any = undefined;
             if (DeBus) {
-            whereConditions[Op.or] = [
-                { usermail: { [Op.iLike]: `%${DeBus}%` } },
-                { userlogin: { [Op.iLike]: `%${DeBus}%` } },
-                { username: { [Op.iLike]: `%${DeBus}%` } },
-                // ✅ Búsqueda en representante sin importar nivel
-                { '$representative.fullName$': { [Op.iLike]: `%${DeBus}%` } },
-                { '$representative.identityCard$': { [Op.iLike]: `%${DeBus}%` } }
+                whereConditions[Op.or] = [
+                    { usermail: { [Op.iLike]: `%${DeBus}%` } },
+                    { userlogin: { [Op.iLike]: `%${DeBus}%` } },
+                    { username: { [Op.iLike]: `%${DeBus}%` } }
+                ];
+                representativeWhere = {
+                    [Op.or]: [
+                        { fullName: { [Op.iLike]: `%${DeBus}%` } },
+                        { identityCard: { [Op.iLike]: `%${DeBus}%` } }
+                    ]
+                };
+            }
+
+            const include: any[] = [
+                {
+                    model: Representative,
+                    as: 'representative',
+                    required: !!DeBus,  // true solo si hay búsqueda por representante
+                    where: representativeWhere, // undefined si no hay búsqueda
+                    include: [
+                        {
+                            model: Student,
+                            as: 'students',
+                            required: false,
+                            attributes: [
+                                'id', 'fullName', 'identityCard', 'birthDate', 'status',
+                                'currentGrade', 'section', 'createdAt', 'balance',
+                                'exonerationPercent', 'admissionDate', 'representativeId', 'userId'
+                            ]
+                        }
+                    ]
+                }
             ];
-            }
 
-            if (Object.keys(whereConditions).length > 0) {
-            queryOptions.where = whereConditions;
-            }
+            const queryOptions: FindAndCountOptions<typeuserlogin_full> = {
+                limit,
+                offset,
+                attributes: { exclude: ['userpass'] },
+                include,
+                where: whereConditions,
+                order: [[config.field, config.orderDirection]],
+                distinct: true
+            };
 
-            // Primero obtenemos el total de registros
-            const count = await UserLogin.count({
-            where: queryOptions.where,
-            include: queryOptions.include,
-            distinct: true,
-            });
-
-            // Ajustar página si se excede
-            let currentPage = page;
-            let finalOffset = offset;
-            const totalPages = Math.ceil(count / limit);
-
-            if (currentPage > totalPages && totalPages > 0) {
-            currentPage = totalPages;
-            finalOffset = (currentPage - 1) * limit;
-            }
-
-            // Obtener datos con offset corregido
-            const rows = await UserLogin.findAll({
-            ...queryOptions,
-            offset: finalOffset,
-            });
+            const { count, rows } = await UserLogin.findAndCountAll(queryOptions);
 
             // Transformar respuesta
             const transformedRows = rows.map(user => {
-            const userJson = user.toJSON() as any;
-            if (userJson.representative && userJson.representative.students) {
-                const totalBalance = userJson.representative.students.reduce(
-                (sum: number, student: any) => sum + (student.balance || 0),
-                0
-                );
-                userJson.representative.balance = totalBalance;
-                userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
-                style: 'currency',
-                currency: 'USD',
-                minimumFractionDigits: 2
-                }).format(totalBalance);
-                userJson.representative.balanceStatus =
-                totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
-            }
-            return userJson;
+                const userJson = user.toJSON() as any;
+                if (userJson.representative && userJson.representative.students) {
+                    const totalBalance = userJson.representative.students.reduce(
+                        (sum: number, student: any) => sum + (student.balance || 0),
+                        0
+                    );
+                    userJson.representative.balance = totalBalance;
+                    userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
+                        style: 'currency',
+                        currency: 'USD',
+                        minimumFractionDigits: 2
+                    }).format(totalBalance);
+                    userJson.representative.balanceStatus =
+                        totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
+                }
+                return userJson;
             });
 
             res.status(200).json({
-            result: true,
-            content: transformedRows,
-            pagination: {
-                totalRecords: count,
-                currentPage: currentPage,
-                totalPages: totalPages,
-            },
-            error: []
+                result: true,
+                content: transformedRows,
+                pagination: {
+                    totalRecords: count,
+                    currentPage: page,
+                    totalPages: Math.ceil(count / limit),
+                },
+                error: []
             });
         } catch (error: any) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getPaginatedlogin"));
             res.status(500).json({
-            result: false,
-            content: [],
-            error: ['Error al obtener usuarios']
+                result: false,
+                content: [],
+                error: ['Error al obtener usuarios: ' + error.message]
             });
         }
-        }
+    }
     //#endregion
     private static formatPaginatedResponse(rows: any[], count: number, currentPage: number, limit: number, res: Response) {
         const totalPages = Math.ceil(count / limit);
