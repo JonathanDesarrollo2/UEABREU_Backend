@@ -78,15 +78,71 @@ export class BillingService {
       const isNewStudent = admissionDate >= schoolStartDate;
 
       const bcvRate = await this.getCurrentBCVRate();
-      let currentBalanceUSD = student.balance || 0; // balance en USD
+      let currentBalanceUSD = student.balance || 0;
 
       const monthNames = [
         "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
         "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
       ];
 
+      // ================================================================
+      // 🔥 LÓGICA ESPECIAL PARA AÑO 2026-2027
+      // Solo se cobra la mensualidad del mes en curso.
+      // No se cobran inscripción, gasto administrativo ni anticipo agosto.
+      // ================================================================
+      if (fees.schoolYear === '2026-2027') {
+        const today = await getCurrentDate();
+        if (today >= schoolStartDate) {
+          const year = today.getFullYear();
+          const month = today.getMonth();
+          const desc = `Mensualidad ${monthNames[month]} ${year}`;
+          const existing = await Transaction.findOne({
+            where: {
+              studentId: student.id,
+              type: TransactionType.FEE,
+              description: desc,
+              createdAt: {
+                [Op.gte]: new Date(year, month, 1),
+                [Op.lt]: new Date(year, month + 1, 1)
+              }
+            },
+            transaction: t,
+          });
+          if (!existing) {
+            const exoneration = student.exonerationPercent || 0;
+            let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
+            monthlyUSD = Math.round(monthlyUSD * 100) / 100;
+            const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
+            await Transaction.create({
+              studentId: student.id,
+              representativeId,
+              type: TransactionType.FEE,
+              amount: monthlyBS,
+              amountUSD: monthlyUSD,
+              bcvRate,
+              description: desc,
+              paymentMethod: PaymentMethod.CASH,
+              status: TransactionStatus.COMPLETED,
+              balanceBefore: currentBalanceUSD,
+              balanceAfter: currentBalanceUSD - monthlyUSD,
+            }, { transaction: t });
+            currentBalanceUSD -= monthlyUSD;
+          }
+        }
+
+        await student.update({
+          balance: currentBalanceUSD,
+          hasPaidInscription: true,
+        }, { transaction: t });
+
+        if (!externalTransaction) await t.commit();
+        return;
+      }
+      // ================================================================
+
+      // ----- Lógica normal para otros años -----
       if (isNewStudent) {
-        // --- Cargos para NUEVO INGRESO (USD) ---
+        // Cargos para NUEVO INGRESO
         if (!student.hasPaidInscription) {
           const usd = fees.inscriptionFeeUSD!;
           const bs = Math.round(usd * bcvRate * 100) / 100;
@@ -190,13 +246,13 @@ export class BillingService {
         }, { transaction: t });
 
       } else {
-        // --- Cargos para REGULAR ---
+        // Cargos para REGULAR (retroactivo)
         const today = await getCurrentDate();
         if (today >= schoolStartDate) {
-          if (fees.schoolYear === '2026-2027') {
-            // 🔥 SOLO AÑO 2026-2027: cobrar únicamente la mensualidad del mes actual
-            const year = today.getFullYear();
-            const month = today.getMonth();
+          const cursor = new Date(schoolStartDate);
+          while (cursor <= today) {
+            const year = cursor.getFullYear();
+            const month = cursor.getMonth();
             const desc = `Mensualidad ${monthNames[month]} ${year}`;
             const existing = await Transaction.findOne({
               where: {
@@ -230,60 +286,16 @@ export class BillingService {
               }, { transaction: t });
               currentBalanceUSD -= monthlyUSD;
             }
-          } else {
-            // Comportamiento normal para otros años: cobrar retroactivo desde inicio
-            const cursor = new Date(schoolStartDate);
-            while (cursor <= today) {
-              const year = cursor.getFullYear();
-              const month = cursor.getMonth();
-              const desc = `Mensualidad ${monthNames[month]} ${year}`;
-              const existing = await Transaction.findOne({
-                where: {
-                  studentId: student.id,
-                  type: TransactionType.FEE,
-                  description: desc,
-                  createdAt: {
-                    [Op.gte]: new Date(year, month, 1),
-                    [Op.lt]: new Date(year, month + 1, 1)
-                  }
-                },
-                transaction: t,
-              });
-              if (!existing) {
-                const exoneration = student.exonerationPercent || 0;
-                let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
-                monthlyUSD = Math.round(monthlyUSD * 100) / 100;
-                const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
-                await Transaction.create({
-                  studentId: student.id,
-                  representativeId,
-                  type: TransactionType.FEE,
-                  amount: monthlyBS,
-                  amountUSD: monthlyUSD,
-                  bcvRate,
-                  description: desc,
-                  paymentMethod: PaymentMethod.CASH,
-                  status: TransactionStatus.COMPLETED,
-                  balanceBefore: currentBalanceUSD,
-                  balanceAfter: currentBalanceUSD - monthlyUSD,
-                }, { transaction: t });
-                currentBalanceUSD -= monthlyUSD;
-              }
-              cursor.setMonth(cursor.getMonth() + 1);
-            }
+            cursor.setMonth(cursor.getMonth() + 1);
           }
         }
 
         await student.update({ balance: currentBalanceUSD }, { transaction: t });
       }
 
-      if (!externalTransaction) {
-        await t.commit();
-      }
+      if (!externalTransaction) await t.commit();
     } catch (error) {
-      if (!externalTransaction) {
-        await t.rollback();
-      }
+      if (!externalTransaction) await t.rollback();
       throw error;
     }
   }
