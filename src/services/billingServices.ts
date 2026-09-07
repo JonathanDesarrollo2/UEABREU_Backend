@@ -190,13 +190,13 @@ export class BillingService {
         }, { transaction: t });
 
       } else {
-        // --- Cargos para REGULAR (solo mensualidades en USD) ---
+        // --- Cargos para REGULAR ---
         const today = await getCurrentDate();
         if (today >= schoolStartDate) {
-          const cursor = new Date(schoolStartDate);
-          while (cursor <= today) {
-            const year = cursor.getFullYear();
-            const month = cursor.getMonth();
+          if (fees.schoolYear === '2026-2027') {
+            // 🔥 SOLO AÑO 2026-2027: cobrar únicamente la mensualidad del mes actual
+            const year = today.getFullYear();
+            const month = today.getMonth();
             const desc = `Mensualidad ${monthNames[month]} ${year}`;
             const existing = await Transaction.findOne({
               where: {
@@ -230,7 +230,47 @@ export class BillingService {
               }, { transaction: t });
               currentBalanceUSD -= monthlyUSD;
             }
-            cursor.setMonth(cursor.getMonth() + 1);
+          } else {
+            // Comportamiento normal para otros años: cobrar retroactivo desde inicio
+            const cursor = new Date(schoolStartDate);
+            while (cursor <= today) {
+              const year = cursor.getFullYear();
+              const month = cursor.getMonth();
+              const desc = `Mensualidad ${monthNames[month]} ${year}`;
+              const existing = await Transaction.findOne({
+                where: {
+                  studentId: student.id,
+                  type: TransactionType.FEE,
+                  description: desc,
+                  createdAt: {
+                    [Op.gte]: new Date(year, month, 1),
+                    [Op.lt]: new Date(year, month + 1, 1)
+                  }
+                },
+                transaction: t,
+              });
+              if (!existing) {
+                const exoneration = student.exonerationPercent || 0;
+                let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
+                monthlyUSD = Math.round(monthlyUSD * 100) / 100;
+                const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
+                await Transaction.create({
+                  studentId: student.id,
+                  representativeId,
+                  type: TransactionType.FEE,
+                  amount: monthlyBS,
+                  amountUSD: monthlyUSD,
+                  bcvRate,
+                  description: desc,
+                  paymentMethod: PaymentMethod.CASH,
+                  status: TransactionStatus.COMPLETED,
+                  balanceBefore: currentBalanceUSD,
+                  balanceAfter: currentBalanceUSD - monthlyUSD,
+                }, { transaction: t });
+                currentBalanceUSD -= monthlyUSD;
+              }
+              cursor.setMonth(cursor.getMonth() + 1);
+            }
           }
         }
 
@@ -397,7 +437,7 @@ export class BillingService {
     });
 
     for (const student of students) {
-      let currentBalanceUSD = student.balance || 0; // ✅ ahora es let
+      let currentBalanceUSD = student.balance || 0;
       const exoneration = student.exonerationPercent || 0;
       let feeUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
       feeUSD = Math.round(feeUSD * 100) / 100;
@@ -406,7 +446,6 @@ export class BillingService {
       const feeBS = Math.round(feeUSD * bcvRate * 100) / 100;
       const descMensualidad = `Mensualidad ${monthNames[month]} ${year}`;
 
-      // 1. Mensualidad
       const existingMensualidad = await Transaction.findOne({
         where: {
           studentId: student.id,
@@ -434,12 +473,11 @@ export class BillingService {
           balanceAfter: currentBalanceUSD - feeUSD,
         });
 
-        currentBalanceUSD -= feeUSD; // ✅ actualizar variable
+        currentBalanceUSD -= feeUSD;
         await student.update({ balance: currentBalanceUSD });
       }
 
-      // 2. Recargo por pronto pago vencido si corresponde
-      const newBalanceUSD = currentBalanceUSD; // ahora es correcto
+      const newBalanceUSD = currentBalanceUSD;
       if (today.getDate() > deadlineDay && newBalanceUSD < 0) {
         const descRecargo = `Recargo por pronto pago vencido ${monthNames[month]} ${year}`;
         const existingRecargo = await Transaction.findOne({

@@ -60,6 +60,7 @@ static listApplications = async (req: Request, res: Response) => {
       representativeName: app.representative?.fullName,
       userActive: app.user?.userstatus ?? false,
       createdAt: app.createdAt,
+      userId: app.userId,
     }));
 
     res.status(200).json({
