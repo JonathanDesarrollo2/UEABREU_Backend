@@ -525,7 +525,6 @@ export class BalanceController {
         return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
       }
 
-      // ✅ Convertir monto de Bs a USD usando tasa actual
       const bcvRate = await BillingService.getCurrentBCVRate();
       const amountUSD = amount / bcvRate;
 
@@ -625,7 +624,6 @@ export class BalanceController {
         return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
       }
 
-      // ✅ Convertir monto de Bs a USD
       const bcvRate = await BillingService.getCurrentBCVRate();
       const amountUSD = amount / bcvRate;
 
@@ -710,6 +708,123 @@ export class BalanceController {
       res.status(500).json({ result: false, content: [], error: [`Error al realizar retiro: ${error.message}`] });
     }
   };
+
+  // ================== NUEVO MÉTODO: Mover pago entre estudiantes ==================
+  static movePaymentBetweenStudents = async (req: Request, res: Response) => {
+    const transaction = await sequelize.transaction();
+    try {
+      const { transactionId, targetStudentId } = req.body;
+
+      if (!transactionId || !targetStudentId) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['transactionId y targetStudentId son requeridos'] });
+      }
+
+      // Obtener transacción origen
+      const sourceTransaction = await Transaction.findByPk(transactionId, { transaction });
+      if (!sourceTransaction) {
+        await transaction.rollback();
+        return res.status(404).json({ result: false, content: [], error: ['Transacción no encontrada'] });
+      }
+
+      // Validar que sea un depósito completado y que tenga estudiante asignado
+      if (sourceTransaction.type !== TransactionType.DEPOSIT || sourceTransaction.status !== TransactionStatus.COMPLETED) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['La transacción debe ser un depósito completado'] });
+      }
+      if (!sourceTransaction.studentId) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['La transacción no tiene un estudiante asignado'] });
+      }
+
+      // Obtener estudiante origen
+      const sourceStudent = await Student.findByPk(sourceTransaction.studentId, { transaction });
+      if (!sourceStudent) {
+        await transaction.rollback();
+        return res.status(404).json({ result: false, content: [], error: ['Estudiante origen no encontrado'] });
+      }
+
+      // Obtener estudiante destino
+      const targetStudent = await Student.findByPk(targetStudentId, { transaction });
+      if (!targetStudent) {
+        await transaction.rollback();
+        return res.status(404).json({ result: false, content: [], error: ['Estudiante destino no encontrado'] });
+      }
+
+      // Verificar que ambos pertenezcan al mismo representante
+      if (sourceStudent.representativeId !== targetStudent.representativeId) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['Los estudiantes deben pertenecer al mismo representante'] });
+      }
+
+      // Verificar que el estudiante destino no sea el mismo que el origen
+      if (sourceStudent.id === targetStudent.id) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['No se puede mover a sí mismo'] });
+      }
+
+      // Obtener monto en USD de la transacción original
+      const amountUSD = sourceTransaction.amountUSD || 0;
+      if (amountUSD <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['Monto inválido en la transacción'] });
+      }
+
+      // Revertir el depósito del estudiante origen
+      await sourceStudent.update({
+        balance: (sourceStudent.balance || 0) - amountUSD,
+      }, { transaction });
+
+      // Aplicar el depósito al estudiante destino
+      await targetStudent.update({
+        balance: (targetStudent.balance || 0) + amountUSD,
+      }, { transaction });
+
+      // Marcar la transacción original como revertida
+      await sourceTransaction.update({
+        status: TransactionStatus.REVERSED,
+      }, { transaction });
+
+      // Crear nueva transacción de depósito para el estudiante destino
+      const newTransaction = await Transaction.create({
+        representativeId: sourceTransaction.representativeId,
+        studentId: targetStudent.id,
+        type: TransactionType.DEPOSIT,
+        amount: sourceTransaction.amount,       // mantener monto en Bs original
+        amountUSD: amountUSD,
+        bcvRate: sourceTransaction.bcvRate,
+        description: sourceTransaction.description || 'Depósito movido',
+        paymentMethod: sourceTransaction.paymentMethod,
+        reference: `${sourceTransaction.reference || 'MOVED'}-MOVED-${Date.now()}`,
+        status: TransactionStatus.COMPLETED,
+        createdBy: sourceTransaction.createdBy,
+        balanceBefore: (targetStudent.balance || 0) - amountUSD,
+        balanceAfter: targetStudent.balance,
+        transactionDate: new Date(),
+      }, { transaction });
+
+      await transaction.commit();
+
+      res.status(200).json({
+        result: true,
+        content: {
+          message: 'Pago movido exitosamente',
+          sourceTransactionId: sourceTransaction.id,
+          newTransactionId: newTransaction.id,
+          sourceStudentId: sourceStudent.id,
+          targetStudentId: targetStudent.id,
+          amountUSD: amountUSD,
+        },
+        error: []
+      });
+    } catch (error: any) {
+      await transaction.rollback();
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("movePaymentBetweenStudents"));
+      res.status(500).json({ result: false, content: [], error: [`Error al mover pago: ${error.message}`] });
+    }
+  };
+
+  // ================== FIN NUEVO MÉTODO ==================
 
   static checkPaymentExists = async (req: Request, res: Response) => {
     try {

@@ -158,4 +158,12 @@ router.get('/transactions',
   validateRoutes,
   BalanceController.getAllTransactions
 );
+
+router.post('/transaction/move',
+  authsession,
+  body('transactionId').isUUID().withMessage('ID de transacción inválido'),
+  body('targetStudentId').isUUID().withMessage('ID de estudiante destino inválido'),
+  validateRoutes,
+  BalanceController.movePaymentBetweenStudents
+);
 export default router;
