@@ -710,14 +710,25 @@ export class BalanceController {
   };
 
   // ================== NUEVO MÉTODO: Mover pago entre estudiantes ==================
+    // ================== MÉTODO: Mover pago entre estudiantes (parcial o total) ==================
   static movePaymentBetweenStudents = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
-      const { transactionId, targetStudentId } = req.body;
+      const { transactionId, targetStudentId, amountToMove } = req.body;
 
-      if (!transactionId || !targetStudentId) {
+      if (!transactionId || !targetStudentId || amountToMove === undefined) {
         await transaction.rollback();
-        return res.status(400).json({ result: false, content: [], error: ['transactionId y targetStudentId son requeridos'] });
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: ['transactionId, targetStudentId y amountToMove son requeridos']
+        });
+      }
+
+      const amountToMoveBs = parseFloat(amountToMove);
+      if (isNaN(amountToMoveBs) || amountToMoveBs <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['El monto a mover debe ser mayor a 0'] });
       }
 
       // Obtener transacción origen
@@ -735,6 +746,34 @@ export class BalanceController {
       if (!sourceTransaction.studentId) {
         await transaction.rollback();
         return res.status(400).json({ result: false, content: [], error: ['La transacción no tiene un estudiante asignado'] });
+      }
+
+      const sourceBcvRate = sourceTransaction.bcvRate || 0;
+      if (sourceBcvRate <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['Tasa BCV inválida en la transacción original'] });
+      }
+
+      const originalAmountBs = sourceTransaction.amount || 0;
+      const originalAmountUSD = sourceTransaction.amountUSD || 0;
+
+      if (amountToMoveBs > originalAmountBs) {
+        await transaction.rollback();
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: [`El monto a mover (${amountToMoveBs} Bs) no puede ser mayor al monto original (${originalAmountBs} Bs)`]
+        });
+      }
+
+      // Convertir el monto a mover a USD usando la tasa histórica original
+      const amountToMoveUSD = Math.round((amountToMoveBs / sourceBcvRate) * 100) / 100;
+      const remainingAmountUSD = Math.round((originalAmountUSD - amountToMoveUSD) * 100) / 100;
+      const remainingAmountBs = Math.round((originalAmountBs - amountToMoveBs) * 100) / 100;
+
+      if (amountToMoveUSD <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['El monto a mover es demasiado pequeño'] });
       }
 
       // Obtener estudiante origen
@@ -757,49 +796,60 @@ export class BalanceController {
         return res.status(400).json({ result: false, content: [], error: ['Los estudiantes deben pertenecer al mismo representante'] });
       }
 
-      // Verificar que el estudiante destino no sea el mismo que el origen
       if (sourceStudent.id === targetStudent.id) {
         await transaction.rollback();
         return res.status(400).json({ result: false, content: [], error: ['No se puede mover a sí mismo'] });
       }
 
-      // Obtener monto en USD de la transacción original
-      const amountUSD = sourceTransaction.amountUSD || 0;
-      if (amountUSD <= 0) {
-        await transaction.rollback();
-        return res.status(400).json({ result: false, content: [], error: ['Monto inválido en la transacción'] });
+      const sourceBalanceBefore = sourceStudent.balance || 0;
+      const targetBalanceBefore = targetStudent.balance || 0;
+
+      // 1) Restar del origen el monto original y devolver el remanente
+      const sourceBalanceAfter = Math.round((sourceBalanceBefore - amountToMoveUSD) * 100) / 100;
+      await sourceStudent.update({ balance: sourceBalanceAfter }, { transaction });
+
+      // 2) Sumar al destino el monto a mover
+      const targetBalanceAfter = Math.round((targetBalanceBefore + amountToMoveUSD) * 100) / 100;
+      await targetStudent.update({ balance: targetBalanceAfter }, { transaction });
+
+      // 3) Marcar la transacción original como REVERSED
+      await sourceTransaction.update({ status: TransactionStatus.REVERSED }, { transaction });
+
+      // 4) Crear nueva transacción DEPOSIT para el estudiante ORIGEN con el remanente (si queda algo)
+      if (remainingAmountUSD > 0) {
+        await Transaction.create({
+          representativeId: sourceTransaction.representativeId,
+          studentId: sourceStudent.id,
+          type: TransactionType.DEPOSIT,
+          amount: remainingAmountBs,
+          amountUSD: remainingAmountUSD,
+          bcvRate: sourceBcvRate,
+          description: `${sourceTransaction.description || 'Depósito'} (remanente)`,
+          paymentMethod: sourceTransaction.paymentMethod,
+          reference: `${sourceTransaction.reference || 'MOVED'}-REM-${Date.now()}`,
+          status: TransactionStatus.COMPLETED,
+          createdBy: sourceTransaction.createdBy,
+          balanceBefore: Math.round((sourceBalanceBefore - originalAmountUSD) * 100) / 100,
+          balanceAfter: sourceBalanceAfter,
+          transactionDate: new Date(),
+        }, { transaction });
       }
 
-      // Revertir el depósito del estudiante origen
-      await sourceStudent.update({
-        balance: (sourceStudent.balance || 0) - amountUSD,
-      }, { transaction });
-
-      // Aplicar el depósito al estudiante destino
-      await targetStudent.update({
-        balance: (targetStudent.balance || 0) + amountUSD,
-      }, { transaction });
-
-      // Marcar la transacción original como revertida
-      await sourceTransaction.update({
-        status: TransactionStatus.REVERSED,
-      }, { transaction });
-
-      // Crear nueva transacción de depósito para el estudiante destino
-      const newTransaction = await Transaction.create({
+      // 5) Crear nueva transacción DEPOSIT para el estudiante DESTINO con el monto movido
+      await Transaction.create({
         representativeId: sourceTransaction.representativeId,
         studentId: targetStudent.id,
         type: TransactionType.DEPOSIT,
-        amount: sourceTransaction.amount,       // mantener monto en Bs original
-        amountUSD: amountUSD,
-        bcvRate: sourceTransaction.bcvRate,
-        description: sourceTransaction.description || 'Depósito movido',
+        amount: amountToMoveBs,
+        amountUSD: amountToMoveUSD,
+        bcvRate: sourceBcvRate,
+        description: `${sourceTransaction.description || 'Depósito'} (movido)`,
         paymentMethod: sourceTransaction.paymentMethod,
-        reference: `${sourceTransaction.reference || 'MOVED'}-MOVED-${Date.now()}`,
+        reference: `${sourceTransaction.reference || 'MOVED'}-MOV-${Date.now()}`,
         status: TransactionStatus.COMPLETED,
         createdBy: sourceTransaction.createdBy,
-        balanceBefore: (targetStudent.balance || 0) - amountUSD,
-        balanceAfter: targetStudent.balance,
+        balanceBefore: targetBalanceBefore,
+        balanceAfter: targetBalanceAfter,
         transactionDate: new Date(),
       }, { transaction });
 
@@ -808,12 +858,16 @@ export class BalanceController {
       res.status(200).json({
         result: true,
         content: {
-          message: 'Pago movido exitosamente',
+          message: remainingAmountUSD > 0
+            ? `Se movieron ${amountToMoveBs} Bs al estudiante destino. Quedan ${remainingAmountBs} Bs en el estudiante origen.`
+            : `Se movió todo el pago (${amountToMoveBs} Bs) al estudiante destino.`,
           sourceTransactionId: sourceTransaction.id,
-          newTransactionId: newTransaction.id,
           sourceStudentId: sourceStudent.id,
           targetStudentId: targetStudent.id,
-          amountUSD: amountUSD,
+          movedAmountBs: amountToMoveBs,
+          movedAmountUSD: amountToMoveUSD,
+          remainingAmountBs,
+          remainingAmountUSD,
         },
         error: []
       });
@@ -823,6 +877,7 @@ export class BalanceController {
       res.status(500).json({ result: false, content: [], error: [`Error al mover pago: ${error.message}`] });
     }
   };
+  // ================== FIN MÉTODO ==================
 
   // ================== FIN NUEVO MÉTODO ==================
 
