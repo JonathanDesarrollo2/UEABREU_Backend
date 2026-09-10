@@ -3,9 +3,8 @@ import type { Request, Response } from 'express';
 import sequelize from '../database/config';
 import Student from '../database/models/student';
 import Transaction from '../database/models/transaction';
-import Representative from '../database/models/representative';
+import Setting from '../database/models/settings';
 import UserLogin from '../database/models/userlogin';
-import RegistrationApplication from '../database/models/RegistrationAplicattion';
 import { ErrorLog } from '../utility/ErrorLog';
 import { getErrorLocation } from '../utility/callerinfo';
 import { BillingService } from '../services/billingServices';
@@ -13,24 +12,43 @@ import { BillingService } from '../services/billingServices';
 export class SimulationController {
 
   // ─── FECHA SIMULADA ────────────────────────────────────────────────
-  static getSimulatedDate = async (_req: Request, res: Response) => {
-    try {
-      const simulatedDate = process.env.SIMULATED_DATE || null;
-      res.status(200).json({
-        result: true,
-        content: { simulatedDate },
-        error: []
-      });
-    } catch (error: any) {
-      ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("getSimulatedDate"));
-      res.status(500).json({ result: false, content: [], error: ['Error al obtener fecha simulada'] });
+static getSimulatedDate = async (_req: Request, res: Response) => {
+  try {
+    let simulatedDate: string | null = process.env.SIMULATED_DATE ?? null;
+    if (!simulatedDate) {
+      const setting = await Setting.findOne({ where: { key: 'simulated_date' } });
+      simulatedDate = setting?.value ?? null;
     }
-  };
+    res.status(200).json({
+      result: true,
+      content: { simulatedDate },
+      error: []
+    });
+  } catch (error: any) {
+    ErrorLog.createErrorLog(error, 'SimulationController', getErrorLocation("getSimulatedDate"));
+    res.status(500).json({ result: false, content: [], error: ['Error al obtener fecha simulada'] });
+  }
+};
 
   static setSimulatedDate = async (req: Request, res: Response) => {
     try {
       const { date } = req.body;
+      if (!date) {
+        return res.status(400).json({ result: false, content: [], error: ['Fecha requerida'] });
+      }
+
+      // Guardar en variable de entorno para acceso rápido
       process.env.SIMULATED_DATE = date;
+
+      // Guardar en BD para persistencia
+      const [setting, created] = await Setting.findOrCreate({
+        where: { key: 'simulated_date' },
+        defaults: { key: 'simulated_date', value: date, description: 'Fecha simulada para pruebas' }
+      });
+      if (!created) {
+        await setting.update({ value: date });
+      }
+
       res.status(200).json({
         result: true,
         content: { simulatedDate: date },
@@ -45,6 +63,7 @@ export class SimulationController {
   static resetSimulatedDate = async (_req: Request, res: Response) => {
     try {
       delete process.env.SIMULATED_DATE;
+      await Setting.destroy({ where: { key: 'simulated_date' } });
       res.status(200).json({
         result: true,
         content: { simulatedDate: null },
@@ -70,9 +89,8 @@ export class SimulationController {
     }
   };
 
-  // ─── REINICIO TOTAL DE DATOS (SOLO DESARROLLO, SIN BORRAR USUARIOS) ──
+  // ─── REINICIO TOTAL DE DATOS ──
   static resetEverything = async (_req: Request, res: Response) => {
-    // Solo permitir si la simulación está habilitada
     if (process.env.ENABLE_SIMULATION !== 'true') {
       return res.status(403).json({
         result: false,
@@ -83,21 +101,15 @@ export class SimulationController {
 
     const transaction = await sequelize.transaction();
     try {
-      // 1. Eliminar transacciones financieras (historial)
       await Transaction.destroy({ where: {}, transaction });
-
-      // 2. Restaurar estudiantes a pendiente, sin balance y sin inscripción pagada
       await Student.update(
         { status: 'pendiente', balance: 0, hasPaidInscription: false },
         { where: {}, transaction }
       );
-
-      // 3. Desactivar cuentas de representantes (nivel 1)
       await UserLogin.update(
         { userstatus: false },
         { where: { nivel: 1 }, transaction }
       );
-
       await transaction.commit();
 
       res.status(200).json({

@@ -1,22 +1,29 @@
-import Setting from "../database/models/settings";
+// src/utility/dateHelper.ts
+import Setting from '../database/models/settings';
 
-export async function getCurrentDate(): Promise<Date> {
-  // 1. Si existe la variable de entorno SIMULATED_DATE (usada por el simulador), usarla
-  const envDate = process.env.SIMULATED_DATE;
-  if (envDate) {
-    return new Date(envDate + 'T00:00:00');
+export const getCurrentDate = async (): Promise<Date> => {
+  // Si la simulación no está habilitada, fecha real
+  if (process.env.ENABLE_SIMULATION !== 'true') {
+    return new Date();
   }
 
-  // 2. Si no, consultar en la tabla settings (por si hay fecha simulada persistida)
+  // 1. Intentar variable de entorno (por si se estableció en la sesión)
+  const envDate = process.env.SIMULATED_DATE;
+  if (envDate) {
+    const parsed = new Date(envDate + 'T00:00:00');
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+
+  // 2. Intentar persistencia en BD
   try {
     const setting = await Setting.findOne({ where: { key: 'simulated_date' } });
     if (setting && setting.value) {
-      return new Date(setting.value + 'T00:00:00');
+      const parsed = new Date(setting.value + 'T00:00:00');
+      if (!isNaN(parsed.getTime())) return parsed;
     }
   } catch (error) {
-    console.error('Error obteniendo fecha simulada desde Settings:', error);
+    console.error('Error al obtener fecha simulada desde Settings:', error);
   }
 
-  // 3. Finalmente, fecha real
   return new Date();
-}
+};

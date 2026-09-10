@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import { FindAndCountOptions, Op, WhereOptions } from 'sequelize';
 import UserLogin from "../database/models/userlogin";
 import { ErrorLog } from "../utility/ErrorLog";
-import { getErrorLocation } from "../utility/callerinfo"; 
+import { getErrorLocation } from "../utility/callerinfo";
 import { typeuserlogin_full, typeuserlogin_in, typeTokenData, typeuserlogin_active } from "../database/types/userlogin";
 import { generateJWT } from "../utility/genToken";
 import Student from "../database/models/student";
@@ -12,6 +12,7 @@ import sequelize from "../database/config";
 import { Transaction } from "sequelize";
 import Teacher from "../database/models/teacher";
 import { BillingService } from "../services/billingServices";
+import { getCurrentDate } from "../utility/dateHelper";
 
 //#endregion
 
@@ -20,8 +21,6 @@ const getTotalBalance = async (representativeId: string): Promise<number> => {
   const students = await Student.findAll({ where: { representativeId } });
   return students.reduce((sum, s) => sum + (s.balance || 0), 0);
 };
-
-
 
 export class User {
     //#region: Crear usuarios Nuevos post('/adduser')
@@ -32,46 +31,46 @@ export class User {
     //#region: Crear usuarios Nuevos post('/adduser')
 static adduser = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
-    
+
     try {
-        const { 
-            userpass, 
-            userrepass, 
-            representativeData, 
-            studentsData, 
-            ...userFields 
+        const {
+            userpass,
+            userrepass,
+            representativeData,
+            studentsData,
+            ...userFields
         }: typeuserlogin_full = req.body;
 
         // Verificar si el email ya existe
         if (userFields.usermail) {
-            const existingEmail = await UserLogin.findOne({ 
-                where: { usermail: userFields.usermail } 
+            const existingEmail = await UserLogin.findOne({
+                where: { usermail: userFields.usermail }
             });
-            
+
             if (existingEmail) {
                 await transaction.rollback();
-                res.status(202).json({ 
-                    result: false, 
-                    content: [], 
-                    error: [`El email ${userFields.usermail} ya fue asignado a otro usuario`] 
-                }); 
+                res.status(202).json({
+                    result: false,
+                    content: [],
+                    error: [`El email ${userFields.usermail} ya fue asignado a otro usuario`]
+                });
                 return;
             }
         }
 
         // Verificar si el login ya existe
         if (userFields.userlogin) {
-            const existingLogin = await UserLogin.findOne({ 
-                where: { userlogin: userFields.userlogin } 
+            const existingLogin = await UserLogin.findOne({
+                where: { userlogin: userFields.userlogin }
             });
-            
+
             if (existingLogin) {
                 await transaction.rollback();
-                res.status(202).json({ 
-                    result: false, 
-                    content: [], 
-                    error: [`El login ${userFields.userlogin} ya está en uso`] 
-                }); 
+                res.status(202).json({
+                    result: false,
+                    content: [],
+                    error: [`El login ${userFields.userlogin} ya está en uso`]
+                });
                 return;
             }
         }
@@ -86,16 +85,16 @@ static adduser = async (req: Request, res: Response) => {
 
         // Si es representante (nivel 1) Y hay datos de representante
         if (newUser.nivel === 1 && representativeData) {
-            
+
             if (!representativeData || !representativeData.identityCard) {
                 // No hacemos rollback porque el usuario ya se creó
             } else {
                 // Verificar si la cédula del representante ya existe
-                const existingRep = await Representative.findOne({ 
+                const existingRep = await Representative.findOne({
                     where: { identityCard: representativeData.identityCard },
                     transaction
                 });
-                
+
                 if (!existingRep) {
                     // Crear el representante SIN BALANCE
                     try {
@@ -128,7 +127,7 @@ static adduser = async (req: Request, res: Response) => {
                                     where: { identityCard: studentData.identityCard },
                                     transaction
                                 });
-                                
+
                                 if (!existingStudent) {
                                     try {
                                         // ✅ Determinar balance en USD
@@ -139,10 +138,10 @@ static adduser = async (req: Request, res: Response) => {
                                         } else {
                                             studentBalanceUSD = perStudentBalanceUSD;
                                         }
-                                        
+
                                         // ✅ Cast para admitir admissionDate
                                         const typedStudentData = studentData as any;
-                                        let admissionDate = new Date();
+                                        let admissionDate = await getCurrentDate();
                                         if (typedStudentData.admissionDate) {
                                             const parsedDate = new Date(typedStudentData.admissionDate);
                                             if (!isNaN(parsedDate.getTime())) {
@@ -197,23 +196,23 @@ static adduser = async (req: Request, res: Response) => {
 
         // Confirmar transacción
         await transaction.commit();
-        
-        res.status(200).json({ 
-            result: true, 
-            content: [`Usuario Creado Exitosamente`], 
-            error: [] 
-        }); 
+
+        res.status(200).json({
+            result: true,
+            content: [`Usuario Creado Exitosamente`],
+            error: []
+        });
     } catch (error: any) {
         await transaction.rollback();
-        
+
         if (error.name === 'SequelizeValidationError') {
             // Solo registramos, no mostramos al usuario
         }
-        
+
         ErrorLog.createErrorLog(error, 'Server', getErrorLocation("adduser"));
-        res.status(500).json({ 
-            result: false, 
-            content: [], 
+        res.status(500).json({
+            result: false,
+            content: [],
             error: [`Error al crear Usuario: ${error.message}`]
         });
     }
@@ -228,7 +227,7 @@ static adduser = async (req: Request, res: Response) => {
                 res.status(202).json({ result: false, content: [], error: ['Las contraseñas no coinciden'] });
                 return;
             };
-            next(); 
+            next();
         } catch (error) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("ComparePass"));
             res.status(500).json({ result: false, content: [], error: ['Error comprobando las contraseñas'] });
@@ -243,11 +242,11 @@ static adduser = async (req: Request, res: Response) => {
             if (LoginData.usermail) {
                 const existingEmail = await UserLogin.findOne({ where: { usermail: LoginData.usermail } });
                 if (existingEmail) {
-                    res.status(202).json({ result: false, content: [], error: [`El email ${LoginData.usermail} ya fue asignado a otro usuario`] }); 
+                    res.status(202).json({ result: false, content: [], error: [`El email ${LoginData.usermail} ya fue asignado a otro usuario`] });
                     return;
                 }
             }
-            next(); 
+            next();
         } catch (error) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("CheckEmailExists"));
             res.status(500).json({ result: false, content: [], error: ['Error comprobando Email'] });
@@ -255,18 +254,18 @@ static adduser = async (req: Request, res: Response) => {
     };
     //#endregion
 
-    //#region: Verificar si el Login esta Ocupado o Disponible 
+    //#region: Verificar si el Login esta Ocupado o Disponible
     static CheckUserIDExists = async (req: Request, res: Response, next: NextFunction) => {
         try {
             const LoginData: typeuserlogin_full = req.body;
             if (LoginData.userlogin) {
                 const existingLogin = await UserLogin.findOne({ where: { userlogin: LoginData.userlogin } });
                 if (existingLogin) {
-                    res.status(202).json({ result: false, content: [], error: [`El login ${LoginData.userlogin} ya fue asignado a otro usuario`] }); 
+                    res.status(202).json({ result: false, content: [], error: [`El login ${LoginData.userlogin} ya fue asignado a otro usuario`] });
                     return;
                 }
             }
-            next(); 
+            next();
         } catch (error) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("CheckUserIDExists"));
             res.status(500).json({ result: false, content: [], error: ['Error comprobando login del usuario'] });
@@ -277,20 +276,20 @@ static adduser = async (req: Request, res: Response) => {
     //#region Eliminar Usuarios post('/removelogin')
     static removelogin = async (req: Request, res: Response) => {
         const transaction = await sequelize.transaction();
-        
+
         try {
             const loginData: typeuserlogin_full = req.body;
             const ResultadoDB = await UserLogin.findOne({
                 where: { id: loginData.id },
                 transaction
             });
-            
+
             if (!ResultadoDB) {
                 await transaction.rollback();
                 res.status(202).json({ result: false, content: [], error: [`usuario: ${loginData.userlogin}, no encontrado`] });
                 return;
             }
-            
+
             // Verificar si es representante (nivel 1)
             if (ResultadoDB.nivel === 1) {
                 // Buscar el representante asociado
@@ -303,45 +302,45 @@ static adduser = async (req: Request, res: Response) => {
                     }],
                     transaction
                 });
-                
+
                 if (representative) {
                     // Verificar si tiene estudiantes
                     const studentCount = await Student.count({
                         where: { representativeId: representative.id },
                         transaction
                     });
-                    
+
                     // Verificar si tiene deuda (balance total negativo)
                     const totalBalance = await getTotalBalance(representative.id!);
                     if (totalBalance < 0) {
                         await transaction.rollback();
-                        res.status(202).json({ 
-                            result: false, 
-                            content: [], 
-                            error: [`No se puede eliminar el representante ${representative.fullName} porque tiene una deuda de ${Math.abs(totalBalance)}`] 
+                        res.status(202).json({
+                            result: false,
+                            content: [],
+                            error: [`No se puede eliminar el representante ${representative.fullName} porque tiene una deuda de ${Math.abs(totalBalance)}`]
                         });
                         return;
                     }
-                    
+
                     // Verificar si tiene estudiantes
                     if (studentCount > 0) {
                         await transaction.rollback();
-                        res.status(202).json({ 
-                            result: false, 
-                            content: [], 
-                            error: [`No se puede eliminar el representante ${representative.fullName} porque tiene ${studentCount} estudiante(s) registrado(s)`] 
+                        res.status(202).json({
+                            result: false,
+                            content: [],
+                            error: [`No se puede eliminar el representante ${representative.fullName} porque tiene ${studentCount} estudiante(s) registrado(s)`]
                         });
                         return;
                     }
-                    
+
                     // Si no tiene deuda ni estudiantes, eliminar el representante
                     await representative.destroy({ transaction });
                 }
             }
-            
+
             await ResultadoDB.destroy({ transaction });
             await transaction.commit();
-            
+
             res.status(200).json({ result: true, content: [`El usuario: ${loginData.userlogin} fue eliminado exitosamente`], error: [] });
         } catch (error) {
             await transaction.rollback();
@@ -354,23 +353,23 @@ static adduser = async (req: Request, res: Response) => {
     //#region Actualizar Usuarios con gestión de estudiantes post('/updatelogin')
 static updatelogin = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
-    
+
     try {
         const loginData: typeuserlogin_full = req.body;
         const { representativeData, studentsData, ...userUpdateData } = loginData;
-        
+
         // Buscar usuario
         const ResultadoDB = await UserLogin.findOne({
             where: { id: loginData.id },
             transaction
         });
-        
+
         if (!ResultadoDB) {
             await transaction.rollback();
             res.status(202).json({ result: false, content: [], error: [`usuario: ${loginData.userlogin}, no encontrado`] });
             return;
         }
-        
+
         // Verificar si está cambiando de nivel (solo si se envía nivel)
         if (userUpdateData.nivel !== undefined && userUpdateData.nivel !== ResultadoDB.nivel) {
             // Si estaba en nivel 1 (representante) y quiere cambiar a otro nivel
@@ -380,32 +379,32 @@ static updatelogin = async (req: Request, res: Response) => {
                     where: { userId: ResultadoDB.id },
                     transaction
                 });
-                
+
                 if (representative) {
                     // Verificar si el representante tiene estudiantes o deuda
                     const studentCount = await Student.count({
                         where: { representativeId: representative.id },
                         transaction
                     });
-                    
+
                     const totalBalance = await getTotalBalance(representative.id!);
-                    
+
                     if (totalBalance < 0 || studentCount > 0) {
                         await transaction.rollback();
-                        res.status(202).json({ 
-                            result: false, 
-                            content: [], 
-                            error: [`No se puede cambiar el nivel del usuario porque tiene ${studentCount} estudiante(s) y/o una deuda de ${Math.abs(totalBalance)}`] 
+                        res.status(202).json({
+                            result: false,
+                            content: [],
+                            error: [`No se puede cambiar el nivel del usuario porque tiene ${studentCount} estudiante(s) y/o una deuda de ${Math.abs(totalBalance)}`]
                         });
                         return;
                     }
                 }
             }
         }
-        
+
         // Actualizar datos del usuario
         await ResultadoDB.update(userUpdateData, { transaction });
-        
+
         // Si es representante (nivel 1) o sigue siendo representante
         if ((userUpdateData.nivel === 1 || ResultadoDB.nivel === 1) && representativeData) {
             // Buscar el representante asociado
@@ -413,7 +412,7 @@ static updatelogin = async (req: Request, res: Response) => {
                 where: { userId: ResultadoDB.id },
                 transaction
             });
-            
+
             if (representative) {
                 // Actualizar datos del representante (sin balance)
                 const { initialBalance, ...repUpdate } = representativeData;
@@ -425,7 +424,7 @@ static updatelogin = async (req: Request, res: Response) => {
                     userId: ResultadoDB.id,
                 }, { transaction });
             }
-            
+
             // GESTIÓN DE ESTUDIANTES
             if (studentsData && Array.isArray(studentsData) && representative) {
                 // Obtener estudiantes actuales
@@ -433,47 +432,47 @@ static updatelogin = async (req: Request, res: Response) => {
                     where: { representativeId: representative.id },
                     transaction
                 });
-                
+
                 const currentStudentIds = currentStudents.map(s => s.id!);
                 const updatedStudentIds: string[] = [];
-                
+
                 // Procesar cada estudiante del request
                 for (const studentData of studentsData) {
                     const typedStudentData = studentData as any;
-                    
+
                     if (typedStudentData.id && currentStudentIds.includes(typedStudentData.id)) {
                         // Actualizar estudiante existente
                         const existingStudent = await Student.findOne({
-                            where: { 
+                            where: {
                                 id: typedStudentData.id,
-                                representativeId: representative.id 
+                                representativeId: representative.id
                             },
                             transaction
                         });
-                        
+
                         if (existingStudent) {
                             const updateData: any = { ...typedStudentData };
-                            
+
                             if (typedStudentData.birthDate && typeof typedStudentData.birthDate === 'string') {
                                 updateData.birthDate = new Date(typedStudentData.birthDate);
                             }
-                            
+
                             if (typedStudentData.admissionDate && typeof typedStudentData.admissionDate === 'string') {
                                 updateData.admissionDate = new Date(typedStudentData.admissionDate);
                             }
-                            
+
                             if (!typedStudentData.admissionDate) {
                                 delete updateData.admissionDate;
                             }
-                            
+
                             // No permitir actualizar el balance desde aquí; se maneja en transacciones
                             delete updateData.balance;
-                            
+
                             // Asegurar que status se actualice si viene
                             if (typedStudentData.status) {
                                 updateData.status = typedStudentData.status;
                             }
-                            
+
                             await existingStudent.update(updateData, { transaction });
                             updatedStudentIds.push(typedStudentData.id);
                         }
@@ -483,8 +482,12 @@ static updatelogin = async (req: Request, res: Response) => {
                             where: { identityCard: typedStudentData.identityCard },
                             transaction
                         });
-                        
+
                         if (!existingStudentById) {
+                            const admissionDate = typedStudentData.admissionDate
+                                ? new Date(typedStudentData.admissionDate)
+                                : await getCurrentDate();
+
                             const studentCreateData = {
                                 fullName: typedStudentData.fullName,
                                 identityCard: typedStudentData.identityCard,
@@ -502,9 +505,8 @@ static updatelogin = async (req: Request, res: Response) => {
                                 emergencyContact: typedStudentData.emergencyContact,
                                 emergencyPhone: typedStudentData.emergencyPhone,
                                 status: typedStudentData.status || 'pendiente',
-                                admissionDate: typedStudentData.admissionDate ? 
-                                    new Date(typedStudentData.admissionDate) : new Date(),
-                                initialSchoolYear: typedStudentData.initialSchoolYear || 
+                                admissionDate: admissionDate,
+                                initialSchoolYear: typedStudentData.initialSchoolYear ||
                                     new Date().getFullYear().toString(),
                                 currentGrade: typedStudentData.currentGrade || 'En asignar',
                                 section: typedStudentData.section || 'Pendiente',
@@ -525,18 +527,18 @@ static updatelogin = async (req: Request, res: Response) => {
                         }
                     }
                 }
-                
+
                 // Opcional: Eliminar estudiantes que no están en el request
                 // (comentado como antes)
             }
         }
-        
+
         await transaction.commit();
-        
-        res.status(200).json({ 
-            result: true, 
-            content: [`El Usuario ${loginData.userlogin}, fue actualizado exitosamente`], 
-            error: [] 
+
+        res.status(200).json({
+            result: true,
+            content: [`El Usuario ${loginData.userlogin}, fue actualizado exitosamente`],
+            error: []
         });
     } catch (error) {
         await transaction.rollback();
@@ -545,7 +547,7 @@ static updatelogin = async (req: Request, res: Response) => {
     }
 };
 //#endregion
-    
+
     //#region: Lista de Usuarios Paginados get('/listpag')
     static async getPaginatedlogin(req: Request, res: Response) {
         try {
@@ -607,8 +609,8 @@ static updatelogin = async (req: Request, res: Response) => {
                 {
                     model: Representative,
                     as: 'representative',
-                    required: !!DeBus,  // true solo si hay búsqueda por representante
-                    where: representativeWhere, // undefined si no hay búsqueda
+                    required: !!DeBus,
+                    where: representativeWhere,
                     include: [
                         {
                             model: Student,
@@ -676,22 +678,23 @@ static updatelogin = async (req: Request, res: Response) => {
         }
     }
     //#endregion
+
     private static formatPaginatedResponse(rows: any[], count: number, currentPage: number, limit: number, res: Response) {
         const totalPages = Math.ceil(count / limit);
         const transformedRows = rows.map(user => {
             const userJson = user.toJSON ? user.toJSON() : user;
             if (userJson.representative && userJson.representative.students) {
-            const totalBalance = userJson.representative.students.reduce(
-                (sum: number, student: any) => sum + (student.balance || 0), 
-                0
-            );
-            userJson.representative.balance = totalBalance;
-            userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
-                style: 'currency',
-                currency: 'USD',
-                minimumFractionDigits: 2
-            }).format(totalBalance);
-            userJson.representative.balanceStatus = totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
+                const totalBalance = userJson.representative.students.reduce(
+                    (sum: number, student: any) => sum + (student.balance || 0),
+                    0
+                );
+                userJson.representative.balance = totalBalance;
+                userJson.representative.balanceFormatted = new Intl.NumberFormat('es-VE', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 2
+                }).format(totalBalance);
+                userJson.representative.balanceStatus = totalBalance < 0 ? 'debt' : totalBalance > 0 ? 'credit' : 'zero';
             }
             return userJson;
         });
@@ -700,13 +703,13 @@ static updatelogin = async (req: Request, res: Response) => {
             result: true,
             content: transformedRows,
             pagination: {
-            totalRecords: count,
-            currentPage: currentPage,
-            totalPages: totalPages,
+                totalRecords: count,
+                currentPage: currentPage,
+                totalPages: totalPages,
             },
             error: []
         });
-        }
+    }
 
     //#region: Iniciar Sesion post('/privateauth')
     static SesionIn = async (req: Request, res: Response) => {
@@ -716,35 +719,35 @@ static updatelogin = async (req: Request, res: Response) => {
             const ResultadoDB = await UserLogin.findOne({
                 where: { usermail: loginData.usermail }
             });
-            
+
             if (!ResultadoDB) {
                 ErrorLog.createErrorLog(`Credenciales invalidas, usuario no existe`, loginData.usermail, getErrorLocation("SesionIn"));
                 res.status(429).json({ result: false, content: [], error: [`Credenciales invalidas`] });
                 return;
             }
-            
+
             if (!ResultadoDB.userstatus) {
                 ErrorLog.createErrorLog(`Credenciales invalidas, usuario inactivo`, loginData.usermail, getErrorLocation("SesionIn"));
                 res.status(429).json({ result: false, content: [], error: [`Credenciales no autorizada`] });
-                return; 
+                return;
             }
-            
+
             const Comparacion = await ResultadoDB.comparePassword(loginData.userpass);
-            
+
             if (!Comparacion) {
                 ErrorLog.createErrorLog(`Credenciales invalidas, las contraseñas no coinciden`, loginData.usermail, getErrorLocation("SesionIn"));
                 res.status(429).json({ result: false, content: [], error: [`Credenciales invalidas`] });
-                return; 
+                return;
             }
-            
+
             if (!ResultadoDB.id || !ResultadoDB.userlogin || !ResultadoDB.usermail || ResultadoDB.nivel === undefined) {
                 ErrorLog.createErrorLog(`Datos de usuario incompletos`, loginData.usermail, getErrorLocation("SesionIn"));
                 res.status(500).json({ result: false, content: [], error: ['Error en los datos del usuario'] });
                 return;
             }
-            
-            const jwtUser = generateJWT({ 
-                id: ResultadoDB.id,                
+
+            const jwtUser = generateJWT({
+                id: ResultadoDB.id,
                 userlogin: ResultadoDB.userlogin,
                 username: ResultadoDB.username,
                 usermail: ResultadoDB.usermail,
@@ -757,7 +760,7 @@ static updatelogin = async (req: Request, res: Response) => {
             }
 
             res.status(200).json({ result: true, content: jwtUser, error: [] });
-            
+
         } catch (error) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("SesionIn"));
             res.status(500).json({ result: false, content: [], error: ['Error al iniciar sesión'] });
@@ -768,19 +771,19 @@ static updatelogin = async (req: Request, res: Response) => {
     //#region: Usuario Activo get('/onsession')
     static UserActive = async (req: Request, res: Response) => {
         const tokenDataActive: typeTokenData | undefined = req.tokenData;
-        
+
         if (
-            !tokenDataActive?.id || 
+            !tokenDataActive?.id ||
             typeof tokenDataActive.id !== "string" ||
-            !tokenDataActive?.userlogin || 
+            !tokenDataActive?.userlogin ||
             typeof tokenDataActive.userlogin !== "string" ||
-            !tokenDataActive.usermail || 
-            typeof tokenDataActive.usermail !== "string" 
+            !tokenDataActive.usermail ||
+            typeof tokenDataActive.usermail !== "string"
         ) {
             res.status(429).json({ result: false, content: [], error: ["Autenticación requerida. Por favor, inicie sesión nuevamente"] });
             return;
         }
-        
+
         if (tokenDataActive.username && typeof tokenDataActive.username !== "string") {
             res.status(429).json({ result: false, content: [], error: ["Autenticación requerida. Por favor, inicie sesión nuevamente"] });
             return;
@@ -871,17 +874,17 @@ static updatelogin = async (req: Request, res: Response) => {
                 }
             };
 
-            res.status(200).json({ 
-                result: true, 
-                content: result, 
-                error: [] 
+            res.status(200).json({
+                result: true,
+                content: result,
+                error: []
             });
         } catch (error) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getStatistics"));
-            res.status(500).json({ 
-                result: false, 
-                content: [], 
-                error: ['Error obteniendo estadísticas'] 
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error obteniendo estadísticas']
             });
         }
     };
@@ -890,53 +893,53 @@ static updatelogin = async (req: Request, res: Response) => {
     //#region: Endpoints adicionales para gestión de estudiantes
     static addStudentToRepresentative = async (req: Request, res: Response) => {
         const transaction = await sequelize.transaction();
-        
+
         try {
             const { representativeId, studentData } = req.body;
-            
+
             if (!representativeId || !studentData) {
                 await transaction.rollback();
-                res.status(400).json({ 
-                    result: false, 
-                    content: [], 
-                    error: ['representativeId y studentData son requeridos'] 
+                res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: ['representativeId y studentData son requeridos']
                 });
                 return;
             }
-            
+
             // Verificar que el representante exista
             const representative = await Representative.findByPk(representativeId, { transaction });
             if (!representative) {
                 await transaction.rollback();
-                res.status(404).json({ 
-                    result: false, 
-                    content: [], 
-                    error: ['Representante no encontrado'] 
+                res.status(404).json({
+                    result: false,
+                    content: [],
+                    error: ['Representante no encontrado']
                 });
                 return;
             }
-            
+
             // Verificar cédula única
             if (studentData.identityCard) {
                 const existingStudent = await Student.findOne({
                     where: { identityCard: studentData.identityCard },
                     transaction
                 });
-                
+
                 if (existingStudent) {
                     await transaction.rollback();
-                    res.status(400).json({ 
-                        result: false, 
-                        content: [], 
-                        error: [`La cédula ${studentData.identityCard} ya está registrada`] 
+                    res.status(400).json({
+                        result: false,
+                        content: [],
+                        error: [`La cédula ${studentData.identityCard} ya está registrada`]
                     });
                     return;
                 }
             }
-            
+
             // Obtener usuario del representante
             const user = await UserLogin.findByPk(representative.userId, { transaction });
-            
+
             // Crear estudiante con balance 0
             const newStudent = await Student.create({
                 ...studentData,
@@ -944,93 +947,93 @@ static updatelogin = async (req: Request, res: Response) => {
                 representativeId: representative.id,
                 userId: user?.id,
                 status: 'pendiente',
-                admissionDate: new Date(),
+                admissionDate: await getCurrentDate(),
                 initialSchoolYear: new Date().getFullYear().toString(),
                 currentGrade: studentData.currentGrade || 'En asignar',
                 section: studentData.section || 'Pendiente',
                 balance: 0
             }, { transaction });
-            
+
             await transaction.commit();
-            
-            res.status(200).json({ 
-                result: true, 
+
+            res.status(200).json({
+                result: true,
                 content: {
                     message: 'Estudiante agregado exitosamente',
                     studentId: newStudent.id,
                     studentName: newStudent.fullName
-                }, 
-                error: [] 
+                },
+                error: []
             });
-            
+
         } catch (error: any) {
             await transaction.rollback();
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("addStudentToRepresentative"));
-            res.status(500).json({ 
-                result: false, 
-                content: [], 
-                error: [`Error al agregar estudiante: ${error.message}`] 
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: [`Error al agregar estudiante: ${error.message}`]
             });
         }
     };
-    
+
     static removeStudent = async (req: Request, res: Response) => {
         const transaction = await sequelize.transaction();
-        
+
         try {
             const { studentId, representativeId } = req.body;
-            
+
             if (!studentId || !representativeId) {
                 await transaction.rollback();
-                res.status(400).json({ 
-                    result: false, 
-                    content: [], 
-                    error: ['studentId y representativeId son requeridos'] 
+                res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: ['studentId y representativeId son requeridos']
                 });
                 return;
             }
-            
+
             // Verificar que el estudiante exista y pertenezca al representante
             const student = await Student.findOne({
-                where: { 
+                where: {
                     id: studentId,
-                    representativeId: representativeId 
+                    representativeId: representativeId
                 },
                 transaction
             });
-            
+
             if (!student) {
                 await transaction.rollback();
-                res.status(404).json({ 
-                    result: false, 
-                    content: [], 
-                    error: ['Estudiante no encontrado o no pertenece al representante'] 
+                res.status(404).json({
+                    result: false,
+                    content: [],
+                    error: ['Estudiante no encontrado o no pertenece al representante']
                 });
                 return;
             }
-            
+
             // Aquí puedes agregar validaciones adicionales:
             // - Verificar si el estudiante tiene horarios asignados
             // - Verificar si tiene pagos pendientes (balance distinto de cero)
             if (student.balance !== 0) {
                 await transaction.rollback();
-                res.status(400).json({ 
-                    result: false, 
-                    content: [], 
-                    error: [`No se puede eliminar el estudiante ${student.fullName} porque tiene un balance de ${student.balance}`] 
+                res.status(400).json({
+                    result: false,
+                    content: [],
+                    error: [`No se puede eliminar el estudiante ${student.fullName} porque tiene un balance de ${student.balance}`]
                 });
                 return;
             }
-            
+
             await student.destroy({ transaction });
             await transaction.commit();
-            
-            res.status(200).json({ 
-                result: true, 
-                content: [`Estudiante ${student.fullName} eliminado exitosamente`], 
-                error: [] 
+
+            res.status(200).json({
+                result: true,
+                content: [`Estudiante ${student.fullName} eliminado exitosamente`],
+                error: []
             });
-            
+
         } catch (error) {
             await transaction.rollback();
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("removeStudent"));
@@ -1038,7 +1041,7 @@ static updatelogin = async (req: Request, res: Response) => {
         }
     };
     //#endregion
-    
+
     //#region: Obtener lista de estudiantes (para dashboard)
     static listStudents = async (req: Request, res: Response) => {
   try {
@@ -1092,15 +1095,15 @@ static updatelogin = async (req: Request, res: Response) => {
 
   } catch (error: any) {
     ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
-    res.status(500).json({ 
-      result: false, 
-      content: [], 
-      error: ['Error al obtener estudiantes'] 
+    res.status(500).json({
+      result: false,
+      content: [],
+      error: ['Error al obtener estudiantes']
     });
   }
 };
     //#endregion
-    
+
     //#region: Estadísticas de usuarios (para dashboard)
     static getUserStatistics = async (req: Request, res: Response) => {
         try {
@@ -1108,7 +1111,7 @@ static updatelogin = async (req: Request, res: Response) => {
             const totalStudents = await Student.count();
             const totalTeachers = await Teacher.count();
             const totalRepresentatives = await Representative.count();
-            
+
             res.status(200).json({
                 result: true,
                 content: {
@@ -1129,14 +1132,15 @@ static updatelogin = async (req: Request, res: Response) => {
             });
         } catch (error) {
             ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getUserStatistics"));
-            res.status(500).json({ 
-                result: false, 
-                content: [], 
-                error: ['Error al obtener estadísticas'] 
+            res.status(500).json({
+                result: false,
+                content: [],
+                error: ['Error al obtener estadísticas']
             });
         }
     };
     //#endregion
+
     // En src/controllers/UserController.ts
 static updateExoneration = async (req: Request, res: Response) => {
   try {
