@@ -1042,13 +1042,15 @@ export class BalanceController {
     }
   };
 
-   static getAllTransactions = async (req: Request, res: Response) => {
+     static getAllTransactions = async (req: Request, res: Response) => {
     try {
       const {
         page = 1, limit = 20, representativeId, studentId,
         type, status, startDate, endDate, search, sortBy, sortOrder,
         createdByRole,
-        balanceStatus // 'all' | 'debtors' | 'creditors'
+        balanceStatus,
+        studentGrade,      // nuevo
+        studentSection,    // nuevo
       } = req.query;
 
       const offset = (Number(page) - 1) * Number(limit);
@@ -1065,7 +1067,6 @@ export class BalanceController {
         if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
       }
 
-      // Filtrar por estado de balance del representante
       if (balanceStatus && balanceStatus !== 'all') {
         const reps = await Representative.findAll({
           include: [{ model: Student, as: 'students', attributes: ['balance'] }]
@@ -1078,7 +1079,6 @@ export class BalanceController {
           if (balanceStatus === 'creditors' && total >= 0) repIds.push(rep.id);
         });
 
-        // Si no hay match, forzamos un array vacío para que no devuelva todo
         where.representativeId = {
           [Op.in]: repIds.length > 0 ? repIds : ['00000000-0000-0000-0000-000000000000']
         };
@@ -1101,8 +1101,21 @@ export class BalanceController {
         order.push(['createdAt', 'DESC']);
       }
 
+      // Include de Student con filtros opcionales por grado y sección
+      const studentInclude: any = {
+        model: Student,
+        as: 'student',
+        attributes: ['id', 'fullName', 'currentGrade', 'section'],
+      };
+      if (studentGrade || studentSection) {
+        studentInclude.required = true;
+        studentInclude.where = {};
+        if (studentGrade) studentInclude.where.currentGrade = studentGrade;
+        if (studentSection) studentInclude.where.section = studentSection;
+      }
+
       const include: any[] = [
-        { model: Student, as: 'student', attributes: ['id', 'fullName', 'currentGrade'] },
+        studentInclude,
         { model: Representative, as: 'representative', attributes: ['id', 'fullName', 'identityCard'] },
         {
           model: UserLogin,
