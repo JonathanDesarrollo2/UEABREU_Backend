@@ -521,51 +521,137 @@ export class BillingService {
     }, { transaction });
   }
 
+    // 🔒 Mutex para evitar doble ejecución
+  private static applyMonthlyFeeRunning = false;
+
   static async applyMonthlyFee() {
-    const today = await getCurrentDate();
-    const fees = await this.getSchoolFees();
-    const startDate = new Date(fees.monthlyFeeStartDate!);
-    if (today < startDate) return;
+    if (BillingService.applyMonthlyFeeRunning) {
+      console.log('⏳ applyMonthlyFee ya está en ejecución, se omite esta llamada');
+      return;
+    }
+    BillingService.applyMonthlyFeeRunning = true;
 
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const monthNames = [
-      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-    ];
+    try {
+      const today = await getCurrentDate();
+      const fees = await this.getSchoolFees();
+      const startDate = new Date(fees.monthlyFeeStartDate!);
+      if (today < startDate) return;
 
-    const bcvRate = await this.getCurrentBCVRate();
-    const deadlineDay = fees.prontoPagoDeadlineDay || 10;
+      const year = today.getFullYear();
+      const month = today.getMonth();
+      const monthNames = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+      ];
 
-    // Septiembre 2026: no aplicar nada
-    if (year === 2026 && month === 8) return;
+      const bcvRate = await this.getCurrentBCVRate();
+      const deadlineDay = fees.prontoPagoDeadlineDay || 10;
 
-    const students = await Student.findAll({
-      where: {
-        status: {
-          [Op.in]: ['regular', 'repitiente', 'condicionado']
+      // Septiembre 2026: no aplicar nada
+      if (year === 2026 && month === 8) return;
+
+      const students = await Student.findAll({
+        where: {
+          status: {
+            [Op.in]: ['regular', 'repitiente', 'condicionado']
+          }
         }
-      }
-    });
+      });
 
-    for (const student of students) {
-      let currentBalanceUSD = student.balance || 0;
+      for (const student of students) {
+        let currentBalanceUSD = student.balance || 0;
 
-      // 1. Mensualidad del mes actual (excepto agosto)
-      if (month !== 7) {
-        const exoneration = student.exonerationPercent || 0;
-        let feeUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
-        feeUSD = Math.round(feeUSD * 100) / 100;
+        // 1. Mensualidad del mes actual (excepto agosto)
+        if (month !== 7) {
+          const exoneration = student.exonerationPercent || 0;
+          let feeUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
+          feeUSD = Math.round(feeUSD * 100) / 100;
 
-        if (feeUSD > 0) {
-          const feeBS = Math.round(feeUSD * bcvRate * 100) / 100;
-          const descMensualidad = `Mensualidad ${monthNames[month]} ${year}`;
+          if (feeUSD > 0) {
+            const feeBS = Math.round(feeUSD * bcvRate * 100) / 100;
+            const descMensualidad = `Mensualidad ${monthNames[month]} ${year}`;
 
-          const existingMensualidad = await Transaction.findOne({
+            const existingMensualidad = await Transaction.findOne({
+              where: {
+                studentId: student.id,
+                type: TransactionType.FEE,
+                description: descMensualidad,
+                createdAt: {
+                  [Op.gte]: new Date(year, month, 1),
+                  [Op.lt]: new Date(year, month + 1, 1)
+                }
+              }
+            });
+
+            if (!existingMensualidad) {
+              await Transaction.create({
+                studentId: student.id,
+                representativeId: student.representativeId!,
+                type: TransactionType.FEE,
+                amount: feeBS,
+                amountUSD: feeUSD,
+                bcvRate,
+                description: descMensualidad,
+                paymentMethod: PaymentMethod.CASH,
+                status: TransactionStatus.COMPLETED,
+                balanceBefore: currentBalanceUSD,
+                balanceAfter: currentBalanceUSD - feeUSD,
+              });
+              currentBalanceUSD -= feeUSD;
+              await student.update({ balance: currentBalanceUSD });
+            }
+          }
+        }
+
+        // 2. Diciembre 2026: cobrar el segundo 50% de agosto 2027
+        if (year === 2026 && month === 11) {
+          const descFull = "Mensualidad Agosto 2027 (pago completo)";
+          const descSecond = "Segundo 50% mensualidad Agosto 2027";
+          const descFirst = "Anticipo 50% mensualidad Agosto 2027";
+
+          const existingFull = await Transaction.findOne({
+            where: { studentId: student.id, description: descFull }
+          });
+          const existingSecond = await Transaction.findOne({
+            where: { studentId: student.id, description: descSecond }
+          });
+
+          if (!existingFull && !existingSecond) {
+            const existingFirst = await Transaction.findOne({
+              where: { studentId: student.id, description: descFirst }
+            });
+
+            if (existingFirst) {
+              const usdHalf = fees.august2027HalfPaymentUSD!;
+              const bsHalf = Math.round(usdHalf * bcvRate * 100) / 100;
+              await Transaction.create({
+                studentId: student.id,
+                representativeId: student.representativeId!,
+                type: TransactionType.FEE,
+                amount: bsHalf,
+                amountUSD: usdHalf,
+                bcvRate,
+                description: descSecond,
+                paymentMethod: PaymentMethod.CASH,
+                status: TransactionStatus.COMPLETED,
+                balanceBefore: currentBalanceUSD,
+                balanceAfter: currentBalanceUSD - usdHalf,
+              });
+              currentBalanceUSD -= usdHalf;
+              await student.update({ balance: currentBalanceUSD });
+            }
+          }
+        }
+
+        // 3. Recargo por pronto pago vencido
+        const newBalanceUSD = currentBalanceUSD;
+        if (today.getDate() > deadlineDay && newBalanceUSD < 0) {
+          const descRecargo = `Recargo por pronto pago vencido ${monthNames[month]} ${year}`;
+          const existingRecargo = await Transaction.findOne({
             where: {
               studentId: student.id,
               type: TransactionType.FEE,
-              description: descMensualidad,
+              description: descRecargo,
               createdAt: {
                 [Op.gte]: new Date(year, month, 1),
                 [Op.lt]: new Date(year, month + 1, 1)
@@ -573,105 +659,32 @@ export class BillingService {
             }
           });
 
-          if (!existingMensualidad) {
-            await Transaction.create({
-              studentId: student.id,
-              representativeId: student.representativeId!,
-              type: TransactionType.FEE,
-              amount: feeBS,
-              amountUSD: feeUSD,
-              bcvRate,
-              description: descMensualidad,
-              paymentMethod: PaymentMethod.CASH,
-              status: TransactionStatus.COMPLETED,
-              balanceBefore: currentBalanceUSD,
-              balanceAfter: currentBalanceUSD - feeUSD,
-            });
-            currentBalanceUSD -= feeUSD;
-            await student.update({ balance: currentBalanceUSD });
-          }
-        }
-      }
+          if (!existingRecargo) {
+            const recargoUSD = fees.prontoPagoDiscount || 0;
+            const recargoBS = Math.round(recargoUSD * bcvRate * 100) / 100;
 
-      // 2. Diciembre 2026: cobrar el segundo 50% de agosto 2027
-      if (year === 2026 && month === 11) {
-        const descFull = "Mensualidad Agosto 2027 (pago completo)";
-        const descSecond = "Segundo 50% mensualidad Agosto 2027";
-        const descFirst = "Anticipo 50% mensualidad Agosto 2027";
+            if (recargoUSD > 0) {
+              await Transaction.create({
+                studentId: student.id,
+                representativeId: student.representativeId!,
+                type: TransactionType.FEE,
+                amount: recargoBS,
+                amountUSD: recargoUSD,
+                bcvRate,
+                description: descRecargo,
+                paymentMethod: PaymentMethod.CASH,
+                status: TransactionStatus.COMPLETED,
+                balanceBefore: newBalanceUSD,
+                balanceAfter: newBalanceUSD - recargoUSD,
+              });
 
-        const existingFull = await Transaction.findOne({
-          where: { studentId: student.id, description: descFull }
-        });
-        const existingSecond = await Transaction.findOne({
-          where: { studentId: student.id, description: descSecond }
-        });
-
-        if (!existingFull && !existingSecond) {
-          const existingFirst = await Transaction.findOne({
-            where: { studentId: student.id, description: descFirst }
-          });
-
-          if (existingFirst) {
-            const usdHalf = fees.august2027HalfPaymentUSD!;
-            const bsHalf = Math.round(usdHalf * bcvRate * 100) / 100;
-            await Transaction.create({
-              studentId: student.id,
-              representativeId: student.representativeId!,
-              type: TransactionType.FEE,
-              amount: bsHalf,
-              amountUSD: usdHalf,
-              bcvRate,
-              description: descSecond,
-              paymentMethod: PaymentMethod.CASH,
-              status: TransactionStatus.COMPLETED,
-              balanceBefore: currentBalanceUSD,
-              balanceAfter: currentBalanceUSD - usdHalf,
-            });
-            currentBalanceUSD -= usdHalf;
-            await student.update({ balance: currentBalanceUSD });
-          }
-        }
-      }
-
-      // 3. Recargo por pronto pago vencido
-      const newBalanceUSD = currentBalanceUSD;
-      if (today.getDate() > deadlineDay && newBalanceUSD < 0) {
-        const descRecargo = `Recargo por pronto pago vencido ${monthNames[month]} ${year}`;
-        const existingRecargo = await Transaction.findOne({
-          where: {
-            studentId: student.id,
-            type: TransactionType.FEE,
-            description: descRecargo,
-            createdAt: {
-              [Op.gte]: new Date(year, month, 1),
-              [Op.lt]: new Date(year, month + 1, 1)
+              await student.update({ balance: newBalanceUSD - recargoUSD });
             }
           }
-        });
-
-        if (!existingRecargo) {
-          const recargoUSD = fees.prontoPagoDiscount || 0;
-          const recargoBS = Math.round(recargoUSD * bcvRate * 100) / 100;
-
-          if (recargoUSD > 0) {
-            await Transaction.create({
-              studentId: student.id,
-              representativeId: student.representativeId!,
-              type: TransactionType.FEE,
-              amount: recargoBS,
-              amountUSD: recargoUSD,
-              bcvRate,
-              description: descRecargo,
-              paymentMethod: PaymentMethod.CASH,
-              status: TransactionStatus.COMPLETED,
-              balanceBefore: newBalanceUSD,
-              balanceAfter: newBalanceUSD - recargoUSD,
-            });
-
-            await student.update({ balance: newBalanceUSD - recargoUSD });
-          }
         }
       }
+    } finally {
+      BillingService.applyMonthlyFeeRunning = false;
     }
   }
 

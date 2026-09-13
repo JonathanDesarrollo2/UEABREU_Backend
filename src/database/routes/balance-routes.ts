@@ -153,10 +153,30 @@ router.get('/transactions',
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
   query('search').optional().isString(),
+  query('createdByRole').optional().isIn(['admin', 'representative', 'system']),
+  query('balanceStatus').optional().isIn(['all', 'debtors', 'creditors']),
   query('sortBy').optional().isIn(['createdAt', 'amount', 'type', 'student.fullName']),
   query('sortOrder').optional().isIn(['asc', 'desc']),
   validateRoutes,
   BalanceController.getAllTransactions
+);
+
+router.get('/representative/:id/account-statement',
+  authsession,
+  param('id').isUUID().withMessage('ID inválido'),
+  query('startDate').optional().isISO8601(),
+  query('endDate').optional().isISO8601(),
+  query('studentId').optional().isUUID(),
+  validateRoutes,
+  BalanceController.getAccountStatement
+);
+
+router.post('/transaction/move',
+  authsession,
+  body('transactionId').isUUID().withMessage('ID de transacción inválido'),
+  body('targetStudentId').isUUID().withMessage('ID de estudiante destino inválido'),
+  validateRoutes,
+  BalanceController.movePaymentBetweenStudents
 );
 
 router.post('/transaction/move',

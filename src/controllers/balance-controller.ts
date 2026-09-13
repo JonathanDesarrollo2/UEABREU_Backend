@@ -327,7 +327,7 @@ export class BalanceController {
     }
   };
 
-  static getTransactionHistory = async (req: Request, res: Response) => {
+    static getTransactionHistory = async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const {
@@ -366,11 +366,18 @@ export class BalanceController {
         attributes: [
           'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
           'paymentMethod', 'reference', 'status', 'createdAt',
-          'balanceBefore', 'balanceAfter', 'studentId', 'representativeId'
+          'balanceBefore', 'balanceAfter', 'studentId', 'representativeId',
+          'createdBy', 'metadata'
         ],
         include: [
           { model: Student, as: 'student', required: false, attributes: ['id', 'fullName', 'currentGrade', 'section', 'status'] },
-          { model: Representative, as: 'representative', attributes: ['id', 'fullName', 'identityCard'] }
+          { model: Representative, as: 'representative', attributes: ['id', 'fullName', 'identityCard'] },
+          {
+            model: UserLogin,
+            as: 'creator',
+            attributes: ['id', 'userlogin', 'username', 'nivel'],
+            required: false,
+          }
         ],
         distinct: true,
       });
@@ -383,6 +390,8 @@ export class BalanceController {
         const displayStatus = (t.type === TransactionType.FEE || t.type === TransactionType.ADJUSTMENT)
           ? 'Pendiente'
           : (t.status === TransactionStatus.COMPLETED ? 'Completado' : t.status);
+
+        const creatorAny = (t as any).creator;
 
         return {
           id: t.id,
@@ -401,7 +410,15 @@ export class BalanceController {
           balanceBeforeUSD: t.balanceBefore,
           createdAt: t.createdAt,
           student: t.student,
-          representative: t.representative
+          representative: t.representative,
+          metadata: (t as any).metadata || null,
+          creator: creatorAny ? {
+            id: creatorAny.id,
+            userlogin: creatorAny.userlogin,
+            username: creatorAny.username,
+            nivel: creatorAny.nivel,
+            role: creatorAny.nivel === 2 ? 'admin' : creatorAny.nivel === 1 ? 'representative' : 'system',
+          } : null,
         };
       });
 
@@ -832,11 +849,21 @@ export class BalanceController {
           balanceBefore: Math.round((sourceBalanceBefore - originalAmountUSD) * 100) / 100,
           balanceAfter: sourceBalanceAfter,
           transactionDate: new Date(),
+          metadata: {
+            isMovedRemainder: true,
+            sourceTransactionId: sourceTransaction.id,
+            movedToStudentId: targetStudent.id,
+            movedToStudentName: targetStudent.fullName,
+            movedAmountBs: amountToMoveBs,
+            movedAmountUSD: amountToMoveUSD,
+            remainingAmountBs,
+            remainingAmountUSD,
+          },
         }, { transaction });
       }
 
       // 5) Crear nueva transacción DEPOSIT para el estudiante DESTINO con el monto movido
-      await Transaction.create({
+     await Transaction.create({
         representativeId: sourceTransaction.representativeId,
         studentId: targetStudent.id,
         type: TransactionType.DEPOSIT,
@@ -851,6 +878,16 @@ export class BalanceController {
         balanceBefore: targetBalanceBefore,
         balanceAfter: targetBalanceAfter,
         transactionDate: new Date(),
+        metadata: {
+          isMoved: true,
+          sourceTransactionId: sourceTransaction.id,
+          movedFromStudentId: sourceStudent.id,
+          movedFromStudentName: sourceStudent.fullName,
+          movedToStudentId: targetStudent.id,
+          movedToStudentName: targetStudent.fullName,
+          movedAmountBs: amountToMoveBs,
+          movedAmountUSD: amountToMoveUSD,
+        },
       }, { transaction });
 
       await transaction.commit();
@@ -1005,11 +1042,13 @@ export class BalanceController {
     }
   };
 
-  static getAllTransactions = async (req: Request, res: Response) => {
+   static getAllTransactions = async (req: Request, res: Response) => {
     try {
       const {
         page = 1, limit = 20, representativeId, studentId,
-        type, status, startDate, endDate, search, sortBy, sortOrder
+        type, status, startDate, endDate, search, sortBy, sortOrder,
+        createdByRole,
+        balanceStatus // 'all' | 'debtors' | 'creditors'
       } = req.query;
 
       const offset = (Number(page) - 1) * Number(limit);
@@ -1024,6 +1063,25 @@ export class BalanceController {
         where.createdAt = {};
         if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
         if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
+      }
+
+      // Filtrar por estado de balance del representante
+      if (balanceStatus && balanceStatus !== 'all') {
+        const reps = await Representative.findAll({
+          include: [{ model: Student, as: 'students', attributes: ['balance'] }]
+        });
+
+        const repIds: string[] = [];
+        reps.forEach((rep: any) => {
+          const total = rep.students?.reduce((sum: number, s: any) => sum + (s.balance || 0), 0) || 0;
+          if (balanceStatus === 'debtors' && total < 0) repIds.push(rep.id);
+          if (balanceStatus === 'creditors' && total >= 0) repIds.push(rep.id);
+        });
+
+        // Si no hay match, forzamos un array vacío para que no devuelva todo
+        where.representativeId = {
+          [Op.in]: repIds.length > 0 ? repIds : ['00000000-0000-0000-0000-000000000000']
+        };
       }
 
       if (search) {
@@ -1043,6 +1101,27 @@ export class BalanceController {
         order.push(['createdAt', 'DESC']);
       }
 
+      const include: any[] = [
+        { model: Student, as: 'student', attributes: ['id', 'fullName', 'currentGrade'] },
+        { model: Representative, as: 'representative', attributes: ['id', 'fullName', 'identityCard'] },
+        {
+          model: UserLogin,
+          as: 'creator',
+          attributes: ['id', 'userlogin', 'username', 'nivel'],
+          required: false,
+        }
+      ];
+
+      if (createdByRole === 'admin' || createdByRole === 'representative') {
+        include[2].required = true;
+        include[2].where = {
+          nivel: createdByRole === 'admin' ? 2 : 1,
+        };
+      } else if (createdByRole === 'system') {
+        where.createdBy = null;
+        where.type = { [Op.in]: ['fee', 'adjustment'] };
+      }
+
       const { count, rows: transactions } = await Transaction.findAndCountAll({
         where,
         limit: Number(limit),
@@ -1051,17 +1130,16 @@ export class BalanceController {
         attributes: [
           'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
           'paymentMethod', 'reference', 'status', 'createdAt',
-          'balanceBefore', 'balanceAfter', 'studentId', 'representativeId'
+          'balanceBefore', 'balanceAfter', 'studentId', 'representativeId',
+          'createdBy', 'metadata'
         ],
-        include: [
-          { model: Student, as: 'student', attributes: ['id', 'fullName', 'currentGrade'] },
-          { model: Representative, as: 'representative', attributes: ['id', 'fullName', 'identityCard'] }
-        ],
+        include,
         distinct: true,
       });
 
       const formatted = transactions.map(t => {
         const paymentStatus = (t.type === TransactionType.DEPOSIT && (t.balanceAfter ?? 0) < 0) ? 'incompleto' : 'completo';
+        const creatorAny = (t as any).creator;
         return {
           id: t.id,
           type: t.type,
@@ -1076,7 +1154,15 @@ export class BalanceController {
           balanceAfter: t.balanceAfter,
           createdAt: t.createdAt,
           student: t.student,
-          representative: t.representative
+          representative: t.representative,
+          metadata: (t as any).metadata || null,
+          creator: creatorAny ? {
+            id: creatorAny.id,
+            userlogin: creatorAny.userlogin,
+            username: creatorAny.username,
+            nivel: creatorAny.nivel,
+            role: creatorAny.nivel === 2 ? 'admin' : creatorAny.nivel === 1 ? 'representative' : 'system',
+          } : null,
         };
       });
 
@@ -1095,6 +1181,115 @@ export class BalanceController {
     } catch (error: any) {
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getAllTransactions"));
       res.status(500).json({ result: false, content: [], error: ['Error al obtener transacciones'] });
+    }
+  };
+    // ==================================================================
+  // ESTADO DE CUENTA POR REPRESENTANTE
+  // GET /private/balance/representative/:id/account-statement
+  // ==================================================================
+  static getAccountStatement = async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { startDate, endDate, studentId } = req.query;
+
+      const representative = await Representative.findByPk(id, {
+        include: [
+          { model: UserLogin, as: 'user', attributes: ['userlogin', 'usermail'] },
+          {
+            model: Student,
+            as: 'students',
+            attributes: ['id', 'fullName', 'identityCard', 'status', 'currentGrade', 'balance']
+          }
+        ]
+      });
+
+      if (!representative) {
+        return res.status(404).json({ result: false, content: [], error: ['Representante no encontrado'] });
+      }
+
+      const where: any = { representativeId: id };
+      if (studentId) where.studentId = studentId;
+      if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) where.createdAt[Op.gte] = new Date(startDate as string);
+        if (endDate) where.createdAt[Op.lte] = new Date(endDate as string);
+      }
+
+      const transactions = await Transaction.findAll({
+        where,
+        order: [['createdAt', 'ASC']],
+        attributes: [
+          'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
+          'paymentMethod', 'reference', 'status', 'createdAt',
+          'balanceBefore', 'balanceAfter', 'studentId'
+        ],
+        include: [
+          { model: Student, as: 'student', attributes: ['id', 'fullName'] }
+        ]
+      });
+
+      let totalCargosUSD = 0;
+      let totalAbonosUSD = 0;
+      let totalCargosBs = 0;
+      let totalAbonosBs = 0;
+
+      transactions.forEach((t: any) => {
+        if (t.type === 'deposit') {
+          totalAbonosUSD += t.amountUSD || 0;
+          totalAbonosBs += t.amount || 0;
+        } else if (t.type === 'fee') {
+          totalCargosUSD += t.amountUSD || 0;
+          totalCargosBs += t.amount || 0;
+        } else if (t.type === 'adjustment') {
+          // Ajuste a favor: considerarlo abono
+          totalAbonosUSD += t.amountUSD || 0;
+          totalAbonosBs += t.amount || 0;
+        }
+      });
+
+      const totalBalanceUSD =
+        representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
+
+      res.status(200).json({
+        result: true,
+        content: {
+          representative: {
+            id: representative.id,
+            fullName: representative.fullName,
+            identityCard: representative.identityCard,
+            phone: representative.phone,
+            email: representative.user?.usermail || '',
+            balanceUSD: Math.round(totalBalanceUSD * 100) / 100,
+            students: representative.students || []
+          },
+          summary: {
+            totalCargosUSD: Math.round(totalCargosUSD * 100) / 100,
+            totalAbonosUSD: Math.round(totalAbonosUSD * 100) / 100,
+            totalCargosBs: Math.round(totalCargosBs * 100) / 100,
+            totalAbonosBs: Math.round(totalAbonosBs * 100) / 100,
+            saldoFinalUSD: Math.round(totalBalanceUSD * 100) / 100,
+            transactionCount: transactions.length,
+          },
+          transactions: transactions.map((t: any) => ({
+            id: t.id,
+            type: t.type,
+            amount: t.amount,
+            amountUSD: t.amountUSD,
+            bcvRate: t.bcvRate,
+            description: t.description,
+            paymentMethod: t.paymentMethod,
+            reference: t.reference,
+            status: t.status,
+            createdAt: t.createdAt,
+            balanceAfter: t.balanceAfter,
+            student: t.student,
+          })),
+        },
+        error: []
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getAccountStatement"));
+      res.status(500).json({ result: false, content: [], error: ['Error al obtener estado de cuenta'] });
     }
   };
 }
