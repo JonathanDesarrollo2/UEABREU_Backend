@@ -1105,7 +1105,7 @@ export class BalanceController {
       const studentInclude: any = {
         model: Student,
         as: 'student',
-        attributes: ['id', 'fullName', 'currentGrade', 'section'],
+        attributes: ['id', 'fullName', 'currentGrade', 'section', 'balance'],
       };
       if (studentGrade || studentSection) {
         studentInclude.required = true;
