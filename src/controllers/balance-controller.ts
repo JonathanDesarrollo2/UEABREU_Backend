@@ -136,49 +136,46 @@ export class BalanceController {
     }
   };
 
-  static getTopDebtors = async (req: Request, res: Response) => {
+    static getTopDebtors = async (req: Request, res: Response) => {
     try {
       const limit = Number(req.query.limit) || 10;
-      const reps = await Representative.findAll({
+
+      const students = await Student.findAll({
+        attributes: ['id', 'fullName', 'identityCard', 'currentGrade', 'section', 'balance', 'representativeId'],
         include: [
           {
-            model: Student,
-            as: 'students',
-            attributes: ['id', 'fullName', 'balance'],
-            required: false
-          },
-          {
-            model: UserLogin,
-            as: 'user',
-            attributes: ['usermail', 'userstatus'],
-            required: true
+            model: Representative,
+            as: 'representative',
+            attributes: ['id', 'fullName', 'identityCard'],
+            required: true,
           }
         ]
       });
 
-      const debtors = reps
-        .map(rep => {
-          const totalBalanceUSD = rep.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
+      const debtors = students
+        .map((s: any) => {
+          const balance = s.balance || 0;
           return {
-            id: rep.id,
-            fullName: rep.fullName,
-            identityCard: rep.identityCard,
-            balanceUSD: totalBalanceUSD,
-            debtAmount: totalBalanceUSD < 0 ? Math.abs(totalBalanceUSD) : 0,
-            studentCount: rep.students?.length || 0,
-            email: rep.user?.usermail || '',
-            phone: rep.phone
+            id: s.id,
+            fullName: s.fullName,
+            identityCard: s.identityCard,
+            currentGrade: s.currentGrade || 'Sin grado',
+            section: s.section || '-',
+            balanceUSD: Math.round(balance * 100) / 100,
+            debtAmount: balance < 0 ? Math.round(Math.abs(balance) * 100) / 100 : 0,
+            representativeId: s.representative?.id,
+            representativeName: s.representative?.fullName || '—',
           };
         })
-        .filter(d => d.balanceUSD < 0)
-        .sort((a, b) => a.balanceUSD - b.balanceUSD)
+        .filter((s: any) => s.balanceUSD < 0)
+        .sort((a: any, b: any) => a.balanceUSD - b.balanceUSD)
         .slice(0, limit);
 
       res.status(200).json({
         result: true,
         content: {
           debtors,
-          totalDebtUSD: debtors.reduce((sum, d) => sum + d.debtAmount, 0)
+          totalDebtUSD: debtors.reduce((sum: number, d: any) => sum + d.debtAmount, 0)
         },
         error: []
       });
@@ -445,11 +442,20 @@ export class BalanceController {
     }
   };
 
-  static getFinancialStatistics = async (req: Request, res: Response) => {
+    static getFinancialStatistics = async (req: Request, res: Response) => {
     try {
       const totalRepresentatives = await Representative.count();
-      const reps = await Representative.findAll({
-        include: [{ model: Student, as: 'students', attributes: ['balance'] }]
+
+      const students = await Student.findAll({
+        attributes: ['id', 'fullName', 'identityCard', 'currentGrade', 'section', 'balance', 'representativeId'],
+        include: [
+          {
+            model: Representative,
+            as: 'representative',
+            attributes: ['id', 'fullName', 'identityCard'],
+            required: true,
+          }
+        ]
       });
 
       let totalDebtUSD = 0;
@@ -458,18 +464,41 @@ export class BalanceController {
       let creditorsCount = 0;
       let zeroBalanceCount = 0;
 
-      reps.forEach(rep => {
-        const totalBalanceUSD = rep.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
-        if (totalBalanceUSD < 0) {
-          totalDebtUSD += Math.abs(totalBalanceUSD);
+      const debtorsList: any[] = [];
+      const creditorsList: any[] = [];
+      const zeroBalanceList: any[] = [];
+
+      students.forEach((s: any) => {
+        const balance = s.balance || 0;
+
+        const studentData = {
+          id: s.id,
+          fullName: s.fullName,
+          identityCard: s.identityCard,
+          currentGrade: s.currentGrade || 'Sin grado',
+          section: s.section || '-',
+          balanceUSD: Math.round(balance * 100) / 100,
+          representativeId: s.representative?.id || null,
+          representativeName: s.representative?.fullName || '—',
+          representativeIdentityCard: s.representative?.identityCard || '',
+        };
+
+        if (balance < 0) {
+          totalDebtUSD += Math.abs(balance);
           debtorsCount++;
-        } else if (totalBalanceUSD > 0) {
-          totalCreditUSD += totalBalanceUSD;
+          debtorsList.push({ ...studentData, debtAmountUSD: Math.round(Math.abs(balance) * 100) / 100 });
+        } else if (balance > 0) {
+          totalCreditUSD += balance;
           creditorsCount++;
+          creditorsList.push({ ...studentData, creditAmountUSD: Math.round(balance * 100) / 100 });
         } else {
           zeroBalanceCount++;
+          zeroBalanceList.push(studentData);
         }
       });
+
+      debtorsList.sort((a, b) => b.debtAmountUSD - a.debtAmountUSD);
+      creditorsList.sort((a, b) => b.creditAmountUSD - a.creditAmountUSD);
 
       const now = new Date();
       const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -499,9 +528,9 @@ export class BalanceController {
           debtorsCount,
           creditorsCount,
           zeroBalanceCount,
-          totalDebtUSD,
-          totalCreditUSD,
-          netBalanceUSD: totalCreditUSD - totalDebtUSD
+          totalDebtUSD: Math.round(totalDebtUSD * 100) / 100,
+          totalCreditUSD: Math.round(totalCreditUSD * 100) / 100,
+          netBalanceUSD: Math.round((totalCreditUSD - totalDebtUSD) * 100) / 100
         },
         monthlyTransactions: {
           totalDepositsUSD,
@@ -510,10 +539,17 @@ export class BalanceController {
           transactionCount: monthlyTransactions.length
         },
         percentages: {
-          debtorsPercentage: Math.round((debtorsCount / totalRepresentatives) * 100) || 0,
-          creditorsPercentage: Math.round((creditorsCount / totalRepresentatives) * 100) || 0,
-          paymentRate: Math.round(((totalRepresentatives - debtorsCount) / totalRepresentatives) * 100) || 0
-        }
+          debtorsPercentage: students.length > 0 ? Math.round((debtorsCount / students.length) * 100) : 0,
+          creditorsPercentage: students.length > 0 ? Math.round((creditorsCount / students.length) * 100) : 0,
+          paymentRate: students.length > 0 ? Math.round(((students.length - debtorsCount) / students.length) * 100) : 0
+        },
+        chartData: {
+          debtors: debtorsList,
+          creditors: creditorsList,
+          zeroBalance: zeroBalanceList,
+        },
+        topDebtors: debtorsList.slice(0, 5),
+        topCreditors: creditorsList.slice(0, 5),
       };
 
       res.status(200).json({
@@ -1303,6 +1339,112 @@ export class BalanceController {
     } catch (error: any) {
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getAccountStatement"));
       res.status(500).json({ result: false, content: [], error: ['Error al obtener estado de cuenta'] });
+    }
+  };
+    // ==================================================================
+  // RANKING DE ESTUDIANTES (deudores / al día)
+  // GET /private/balance/students-ranking
+  // ==================================================================
+  static getStudentsRanking = async (req: Request, res: Response) => {
+    try {
+      const {
+        type = 'debtors',           // 'debtors' | 'creditors' | 'all'
+        search = '',
+        representativeId,
+        grade,
+        section,
+        page = 1,
+        limit = 20,
+        sortOrder = 'desc',          // 'asc' | 'desc' respecto al campo balance
+      } = req.query;
+
+      const offset = (Number(page) - 1) * Number(limit);
+      const where: any = {};
+
+      if (grade) where.currentGrade = grade;
+      if (section) where.section = section;
+      if (representativeId) where.representativeId = representativeId;
+
+      if (type === 'debtors') where.balance = { [Op.lt]: 0 };
+      else if (type === 'creditors') where.balance = { [Op.gt]: 0 };
+
+      if (search && typeof search === 'string' && search.trim()) {
+        where[Op.or] = [
+          { fullName: { [Op.iLike]: `%${search}%` } },
+          { identityCard: { [Op.iLike]: `%${search}%` } },
+          { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
+          { '$representative.identityCard$': { [Op.iLike]: `%${search}%` } },
+        ];
+      }
+
+      const direction = String(sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+      const include: any[] = [{
+        model: Representative,
+        as: 'representative',
+        attributes: ['id', 'fullName', 'identityCard'],
+        required: true,
+      }];
+
+      const { count, rows } = await Student.findAndCountAll({
+        where,
+        limit: Number(limit),
+        offset,
+        order: [['balance', direction]],
+        attributes: ['id', 'fullName', 'identityCard', 'currentGrade', 'section', 'status', 'balance', 'representativeId'],
+        include,
+        distinct: true,
+      });
+
+      const students = rows.map((s: any) => ({
+        id: s.id,
+        fullName: s.fullName,
+        identityCard: s.identityCard,
+        currentGrade: s.currentGrade || 'Sin grado',
+        section: s.section || '-',
+        status: s.status,
+        balanceUSD: Math.round((s.balance || 0) * 100) / 100,
+        representativeId: s.representative?.id,
+        representativeName: s.representative?.fullName || '—',
+        representativeIdentityCard: s.representative?.identityCard || '',
+      }));
+
+      // Resumen con los mismos filtros (sin paginación)
+      const allFiltered = await Student.findAll({
+        where,
+        attributes: ['balance'],
+        include,
+      });
+
+      let totalDebtUSD = 0, totalCreditUSD = 0, countDebtors = 0, countCreditors = 0;
+      allFiltered.forEach((s: any) => {
+        const b = s.balance || 0;
+        if (b < 0) { totalDebtUSD += Math.abs(b); countDebtors++; }
+        else if (b > 0) { totalCreditUSD += b; countCreditors++; }
+      });
+
+      res.status(200).json({
+        result: true,
+        content: {
+          students,
+          pagination: {
+            totalRecords: count,
+            currentPage: Number(page),
+            totalPages: Math.ceil(count / Number(limit)),
+            pageSize: Number(limit),
+          },
+          summary: {
+            totalDebtUSD: Math.round(totalDebtUSD * 100) / 100,
+            totalCreditUSD: Math.round(totalCreditUSD * 100) / 100,
+            countDebtors,
+            countCreditors,
+          },
+        },
+        error: [],
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getStudentsRanking"));
+      res.status(500).json({ result: false, content: [], error: ['Error al obtener ranking de estudiantes'] });
     }
   };
 }
