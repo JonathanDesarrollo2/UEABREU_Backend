@@ -711,7 +711,7 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
       // ✅ Validar que exista y que los campos usados como índice no sean undefined
       if (!schedule || !schedule.day || !schedule.startBlock || !schedule.endBlock) continue;
 
-      const day = schedule.day;
+       const day = String(schedule.day).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       const startBlock = schedule.startBlock;
       const endBlock = schedule.endBlock;
 
