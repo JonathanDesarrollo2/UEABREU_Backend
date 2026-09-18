@@ -690,9 +690,7 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
       // Si el horario fue configurado para el grado/sección pero todavía no
       // existe una fila individual en StudentSchedule, también debe ser
       // visible para el representante.
-      const schedulesBySection = studentSchedules.some((item: any) => item.schedule)
-        ? studentSchedules
-        : (await Schedule.findAll({
+      const sectionSchedules = (await Schedule.findAll({
             include: [
               { model: Subject, as: 'subject', include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }] },
               { model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }
@@ -702,6 +700,9 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
             const normalize = (value: unknown) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s*a?no\s*$/, '').replace(/\s+/g, '');
             return normalize(schedule.grade) === normalize(student.currentGrade) && String(schedule.section || '').trim().toUpperCase() === String(student.section || '').trim().toUpperCase();
           }).map(schedule => ({ schedule } as any));
+      const schedulesBySection = sectionSchedules.length > 0
+        ? sectionSchedules
+        : studentSchedules.filter((item: any) => item.schedule);
 
       const schedulesByDay: Record<string, any[]> = {};
       const blockTimesByDay: Record<string, any[]> = {};
