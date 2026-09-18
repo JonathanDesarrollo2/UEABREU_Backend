@@ -240,20 +240,7 @@ export class BalanceController {
     try {
       const { id } = req.params;
 
-      const representative = await Representative.findByPk(id, {
-        include: [
-          {
-            model: UserLogin,
-            as: 'user',
-            attributes: ['userlogin', 'usermail', 'userstatus']
-          },
-          {
-            model: Student,
-            as: 'students',
-            attributes: ['id', 'fullName', 'status', 'currentGrade', 'balance']
-          }
-        ]
-      });
+      const representative = await Representative.findByPk(id);
 
       if (!representative) {
         return res.status(404).json({
@@ -263,12 +250,20 @@ export class BalanceController {
         });
       }
 
-      const totalBalanceUSD = representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
+      const accountUser = representative.userId
+        ? await UserLogin.findByPk(representative.userId, { attributes: ['usermail'] })
+        : null;
+      const students = await Student.findAll({
+        where: { representativeId: id },
+        attributes: ['id', 'fullName', 'status', 'currentGrade', 'section', 'balance']
+      });
+      const totalBalanceUSD = students.reduce((sum, s) => sum + (s.balance || 0), 0);
 
       const recentTransactions = await Transaction.findAll({
         where: { representativeId: id },
         limit: 10,
-        order: [['createdAt', 'DESC']]
+        order: [['createdAt', 'DESC']],
+        attributes: ['id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description', 'paymentMethod', 'reference', 'status', 'createdAt']
       });
 
       const result = {
@@ -282,9 +277,9 @@ export class BalanceController {
           balanceFormatted: new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD' }).format(totalBalanceUSD),
           balanceStatus: totalBalanceUSD < 0 ? 'debt' : totalBalanceUSD > 0 ? 'credit' : 'zero',
           debtAmount: totalBalanceUSD < 0 ? Math.abs(totalBalanceUSD) : 0,
-          studentCount: representative.students?.length || 0,
-          userEmail: representative.user?.usermail || '',
-          students: representative.students?.map(s => ({
+          studentCount: students.length,
+          userEmail: accountUser?.usermail || '',
+          students: students.map(s => ({
             id: s.id,
             fullName: s.fullName,
             status: s.status,
@@ -1017,7 +1012,7 @@ export class BalanceController {
       if (!email) {
         return res.status(400).json({ result: false, content: [], error: ['Email es requerido'] });
       }
-      const user = await UserLogin.findOne({ where: { usermail: email as string } });
+      const user = await UserLogin.findOne({ where: { usermail: String(email).trim().toLowerCase() }, attributes: ['id'] });
       if (!user) return res.status(404).json({ result: false, content: [], error: ['Usuario no encontrado'] });
       const representative = await Representative.findOne({ where: { userId: user.id } });
       if (!representative) return res.status(404).json({ result: false, content: [], error: ['No se encontró representante asociado a este usuario'] });
