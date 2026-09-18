@@ -58,6 +58,16 @@ export class BillingService {
     });
   }
 
+  /** Inicializa la fecha actual una sola vez si una instalación aún no tiene historial. */
+  public static async ensureCurrentRate(): Promise<ExchangeRate> {
+    const today = await this.getCaracasDate();
+    const existing = await ExchangeRate.findOne({ where: { effectiveDate: today } });
+    if (existing) return existing;
+    const bankAPI = new BankAPI();
+    const bcvRate = await bankAPI.getBCVRate();
+    return ExchangeRate.create({ effectiveDate: today, rate: bcvRate.PriceRateBCV, fetchedAt: new Date(), source: 'BNC-bootstrap' });
+  }
+
   private static async getSchoolFees(): Promise<SchoolFee> {
     let fee = await SchoolFee.findOne({ where: { schoolYear: '2026-2027' } });
     if (!fee) {

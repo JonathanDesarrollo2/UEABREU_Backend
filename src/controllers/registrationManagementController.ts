@@ -141,6 +141,32 @@ static activateApplication = async (req: Request, res: Response) => {
       return;
     }
 
+    // Las solicitudes de un representante existente no crean la cuenta de
+    // usuario otra vez. El estudiante se crea únicamente al aprobar la
+    // solicitud desde administración.
+    const snapshot: any = application.formSnapshot;
+    if (snapshot?.source === 'existing-representative' && snapshot.studentData) {
+      const studentData = snapshot.studentData;
+      const { aspiredGrade: _aspiredGrade, ...studentFields } = studentData;
+      const duplicated = await Student.findOne({ where: { identityCard: studentData.identityCard }, transaction });
+      if (!duplicated) {
+        await Student.create({
+          ...studentFields,
+          birthDate: new Date(studentData.birthDate),
+          representativeId: application.representativeId,
+          userId: application.userId,
+          status: 'pendiente',
+          admissionDate: await getCurrentDate(),
+          initialSchoolYear: new Date().getFullYear().toString(),
+          currentGrade: studentData.currentGrade || _aspiredGrade || 'En asignar',
+          section: studentData.section || 'Pendiente',
+          hasAllergies: Boolean(studentData.hasAllergies),
+          hasDiseases: Boolean(studentData.hasDiseases),
+          balance: 0
+        }, { transaction });
+      }
+    }
+
     // Activar el usuario
     application.user.userstatus = true;
     await application.user.save({ transaction });
@@ -292,6 +318,8 @@ static async getApplicationData(req: Request, res: Response) {
       return;
     }
 
+    const snapshot: any = application.formSnapshot;
+    const snapshotStudent = snapshot?.source === 'existing-representative' ? snapshot.studentData : null;
     const data = {
       representativeFullName: rep.fullName,
       representativeIdentityCard: rep.identityCard,
@@ -301,7 +329,7 @@ static async getApplicationData(req: Request, res: Response) {
       parentName: rep.parentName,
       parentIdentityCard: rep.parentIdentityCard,
       parentPhone: rep.parentPhone,
-      students: (rep.students || []).map(st => ({
+      students: snapshotStudent ? [snapshotStudent] : (rep.students || []).map(st => ({
         fullName: st.fullName,
         identityCard: st.identityCard,
         birthDate: st.birthDate ? new Date(st.birthDate).toISOString().substring(0, 10) : '',
