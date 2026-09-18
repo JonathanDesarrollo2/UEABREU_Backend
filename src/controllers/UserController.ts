@@ -738,7 +738,11 @@ static updatelogin = async (req: Request, res: Response) => {
             const loginData: typeuserlogin_in = req.body;
 
             const ResultadoDB = await UserLogin.findOne({
-                where: { usermail: loginData.usermail }
+                where: { usermail: loginData.usermail },
+                // El inicio de sesión solo necesita estas columnas. Esto
+                // mantiene operativa la autenticación durante un despliegue
+                // mientras la migración de campos opcionales termina.
+                attributes: ['id', 'usermail', 'userlogin', 'username', 'userpass', 'userstatus', 'nivel']
             });
 
             if (!ResultadoDB) {
