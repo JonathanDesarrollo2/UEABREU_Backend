@@ -81,7 +81,6 @@ router.post('/representative/:id/deposit',
   body('reference').optional().isString(),
   body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   body('paymentDate').notEmpty().isISO8601().withMessage('La fecha del pago es obligatoria'),
-  body('paymentTime').notEmpty().matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('La hora del pago es obligatoria'),
   validateRoutes,
   BalanceController.manualDeposit
 );
@@ -97,7 +96,6 @@ router.post('/representative/:id/withdraw',
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
   body('paymentDate').optional().isISO8601().withMessage('Fecha de pago inválida'),
-  body('paymentTime').optional().matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('Hora de pago inválida'),
   body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
   BalanceController.manualWithdrawal

@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
 import nodemailer from 'nodemailer';
 import UserLogin from '../database/models/userlogin';
+import Representative from '../database/models/representative';
+import Student from '../database/models/student';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.gmail.com',
@@ -11,7 +13,14 @@ const transporter = nodemailer.createTransport({
 
 export class AccountController {
   static getAccount = async (req: Request, res: Response) => {
-    const user = await UserLogin.findByPk(req.tokenData?.id, { attributes: { exclude: ['userpass'] } });
+    const user = await UserLogin.findByPk(req.tokenData?.id, {
+      attributes: { exclude: ['userpass'] },
+      include: [{
+        model: Representative,
+        as: 'representative',
+        include: [{ model: Student, as: 'students', attributes: ['id', 'fullName', 'identityCard', 'initialSchoolYear', 'currentGrade', 'section', 'status'] }]
+      }]
+    });
     if (!user) return res.status(404).json({ result: false, content: [], error: ['Usuario no encontrado'] });
     return res.json({ result: true, content: user, error: [] });
   };
