@@ -10,6 +10,8 @@ export interface typeuserlogin_full {
     userpass?: string;
     userstatus?: boolean;
     nivel?: number;
+    phone?: string;
+    identityCard?: string;
     createdAt?: Date;
     updatedAt?: Date;
     

@@ -1,10 +1,20 @@
 import { Router } from "express";
-import { param } from "express-validator";
+import { param, body } from "express-validator";
+import { requireRegistrationOpen } from "../../middleware/registrationOpen";
 import { authsession } from "../../utility/authsession";
 import { RegistrationManagementController } from "../../controllers/registrationManagementController";
 import { validateRoutes } from "../../middleware/validateRoutes";
 
 const RegistrationManagementRouter = Router();
+
+RegistrationManagementRouter.post('/existing-representative', authsession, requireRegistrationOpen,
+  body('studentData').isObject().withMessage('Datos del estudiante requeridos'),
+  body('studentData.fullName').notEmpty(),
+  body('studentData.identityCard').notEmpty(),
+  body('studentData.birthDate').notEmpty(),
+  validateRoutes,
+  RegistrationManagementController.createForExistingRepresentative
+);
 
 // Listar solicitudes
 RegistrationManagementRouter.get(

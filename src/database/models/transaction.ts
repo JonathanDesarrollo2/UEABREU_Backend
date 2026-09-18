@@ -150,6 +150,10 @@ export default class Transaction extends Model {
   declare transactionDate?: Date;
 
   @AllowNull(true)
+  @Column({ type: DataType.STRING(5) })
+  declare paymentTime?: string;
+
+  @AllowNull(true)
   @Column({ type: DataType.STRING(50) })
   declare category?: string;
 

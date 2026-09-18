@@ -571,14 +571,14 @@ export class BalanceController {
     const transaction = await sequelize.transaction();
     try {
       const { id } = req.params;
-      const { amount, description, paymentMethod, reference, createdBy, studentId } = req.body;
+      const { amount, description, paymentMethod, reference, studentId, paymentDate, paymentTime } = req.body;
 
       if (!amount || amount <= 0) {
         await transaction.rollback();
         return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
       }
 
-      const bcvRate = await BillingService.getCurrentBCVRate();
+      const bcvRate = await BillingService.getRateForDate(String(paymentDate).slice(0, 10));
       const amountUSD = amount / bcvRate;
 
       if (reference) {
@@ -598,11 +598,7 @@ export class BalanceController {
         return res.status(404).json({ result: false, content: [], error: ['Representante no encontrado'] });
       }
 
-      let validCreatedBy = null;
-      if (createdBy) {
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (uuidRegex.test(createdBy)) validCreatedBy = createdBy;
-      }
+      const validCreatedBy = req.tokenData?.id || null;
 
       let targetStudentId: string | null = null;
       let newTotalBalanceUSD: number;
@@ -670,7 +666,7 @@ export class BalanceController {
     const transaction = await sequelize.transaction();
     try {
       const { id } = req.params;
-      const { amount, description, paymentMethod, reference, createdBy, studentId } = req.body;
+      const { amount, description, paymentMethod, reference, createdBy, studentId, paymentTime } = req.body;
 
       if (!amount || amount <= 0) {
         await transaction.rollback();
@@ -740,7 +736,9 @@ export class BalanceController {
         status: TransactionStatus.COMPLETED,
         createdBy: validCreatedBy,
         balanceBefore: totalBalanceUSD,
-        balanceAfter: newTotalBalanceUSD
+         balanceAfter: newTotalBalanceUSD,
+         transactionDate: new Date(),
+         paymentTime
       }, { transaction });
 
       await transaction.commit();

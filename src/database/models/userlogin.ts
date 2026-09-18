@@ -77,6 +77,14 @@ export default class UserLogin extends Model<typeuserlogin_full> {
   @Column({ type: DataType.INTEGER })
   declare nivel?: number;
 
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(20) })
+  declare phone?: string | null;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(20) })
+  declare identityCard?: string | null;
+
   // Hash password antes de crear Y actualizar
   @BeforeCreate
   @BeforeUpdate

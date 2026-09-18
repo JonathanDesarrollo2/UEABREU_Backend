@@ -18,6 +18,7 @@ import SettingsRouter from "./database/routes/settingsRoutes";
 import RegistrationManagementRouter from "./database/routes/registrationManagementRoutes";
 import FeeRoutes from "./database/routes/FeeRoutes";
 import SimulationRouter from "./database/routes/SimulationRoutes";
+import ExchangeRateRoutes from "./database/routes/exchange-rate-routes";
 
 dotenv.config();
 //#endregion
@@ -67,6 +68,7 @@ server.use('/api/private/balance', BalanceRoutes);
 server.use('/api/private/block', routerBlockTime);
 server.use('/api/private/registrations', RegistrationManagementRouter);
 server.use('/api/private/fees', FeeRoutes);
+server.use('/api/private/rates', ExchangeRateRoutes);
 server.use('/api/test', SimulationRouter);
 
 // ⭐ NUEVO: Rutas administrativas para settings (activar/desactivar inscripciones)

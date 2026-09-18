@@ -9,30 +9,53 @@ import { Op } from "sequelize";
 import { BankAPI } from "../bank/bank-api";
 import SchoolFee from "../database/models/ScoolFee";
 import { getCurrentDate } from "../utility/dateHelper";
+import ExchangeRate from "../database/models/exchangeRate";
 
 export class BillingService {
 
   public static async getCurrentBCVRate(): Promise<number> {
-    if (process.env.BCV_TEST_RATE) {
-      const rate = parseFloat(process.env.BCV_TEST_RATE);
-      if (!isNaN(rate) && rate > 0) {
-        console.log(`💱 Usando tasa BCV de prueba (fija): ${rate} Bs/USD`);
-        return rate;
-      }
-    }
+    return this.getRateForDate(await this.getCaracasDate());
+  }
 
-    try {
-      const bankAPI = new BankAPI();
-      const timeoutPromise = new Promise<{ PriceRateBCV: number }>((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout al obtener tasa BCV")), 3000)
-      );
-      const bcvRate = await Promise.race([bankAPI.getBCVRate(), timeoutPromise]);
-      console.log(`💱 Tasa BCV obtenida del banco: ${bcvRate.PriceRateBCV} Bs/USD`);
-      return bcvRate.PriceRateBCV;
-    } catch (error) {
-      console.error("⚠️ No se pudo obtener la tasa BCV, usando tasa de respaldo (45):", error);
-      return 45;
+  private static async getCaracasDate(): Promise<string> {
+    const simulated = process.env.SIMULATED_DATE;
+    if (simulated) return simulated.slice(0, 10);
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Caracas' });
+  }
+
+  /** Obtiene exclusivamente la tasa guardada para la fecha valor solicitada. */
+  public static async getRateForDate(date: string): Promise<number> {
+    const stored = await ExchangeRate.findOne({ where: { effectiveDate: date } });
+    if (!stored?.rate || Number(stored.rate) <= 0) {
+      throw new Error(`No existe una tasa registrada para la fecha ${date}`);
     }
+    return Number(stored.rate);
+  }
+
+  /**
+   * Solo este método consulta al BNC. El cron lo ejecuta a las 18:00 y la
+   * tasa recibida queda vigente desde el día siguiente.
+   */
+  public static async refreshDailyBCVRate(): Promise<ExchangeRate> {
+    const today = await this.getCaracasDate();
+    const effective = new Date(`${today}T00:00:00Z`);
+    effective.setUTCDate(effective.getUTCDate() + 1);
+    const effectiveDate = effective.toISOString().slice(0, 10);
+    const existing = await ExchangeRate.findOne({ where: { effectiveDate } });
+    if (existing) return existing;
+
+    const bankAPI = new BankAPI();
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout al obtener tasa BCV')), 10000)
+    );
+    const bcvRate = await Promise.race([bankAPI.getBCVRate(), timeoutPromise]);
+    if (!bcvRate.PriceRateBCV || bcvRate.PriceRateBCV <= 0) throw new Error('El banco devolvió una tasa inválida');
+    return ExchangeRate.create({
+      effectiveDate,
+      rate: bcvRate.PriceRateBCV,
+      fetchedAt: new Date(),
+      source: 'BNC'
+    });
   }
 
   private static async getSchoolFees(): Promise<SchoolFee> {

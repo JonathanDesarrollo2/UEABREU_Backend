@@ -38,8 +38,15 @@ static adduser = async (req: Request, res: Response) => {
             userrepass,
             representativeData,
             studentsData,
+            phone,
+            identityCard,
             ...userFields
         }: typeuserlogin_full = req.body;
+
+        if (Number(userFields.nivel) === 2 && (!phone || !identityCard)) {
+            await transaction.rollback();
+            return res.status(400).json({ result: false, content: [], error: ['Teléfono y cédula son obligatorios para administradores'] });
+        }
 
         // Verificar si el email ya existe
         if (userFields.usermail) {
@@ -80,7 +87,9 @@ static adduser = async (req: Request, res: Response) => {
             ...userFields,
             userpass: userpass,
             nivel: userFields.nivel || 1,
-            userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true
+            userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true,
+            // Solo se persisten para el usuario administrativo (nivel 2).
+            ...(Number(userFields.nivel) === 2 ? { phone, identityCard } : {})
         }, { transaction });
 
         // Si es representante (nivel 1) Y hay datos de representante
@@ -356,7 +365,7 @@ static updatelogin = async (req: Request, res: Response) => {
 
     try {
         const loginData: typeuserlogin_full = req.body;
-        const { representativeData, studentsData, ...userUpdateData } = loginData;
+        const { representativeData, studentsData, phone, identityCard, userrepass, ...userUpdateData } = loginData;
 
         // Buscar usuario
         const ResultadoDB = await UserLogin.findOne({
@@ -368,6 +377,12 @@ static updatelogin = async (req: Request, res: Response) => {
             await transaction.rollback();
             res.status(202).json({ result: false, content: [], error: [`usuario: ${loginData.userlogin}, no encontrado`] });
             return;
+        }
+
+        const targetNivel = Number(userUpdateData.nivel ?? ResultadoDB.nivel);
+        if (targetNivel === 2 && (!phone || !identityCard) && (!ResultadoDB.phone || !ResultadoDB.identityCard)) {
+            await transaction.rollback();
+            return res.status(400).json({ result: false, content: [], error: ['Teléfono y cédula son obligatorios para administradores'] });
         }
 
         // Verificar si está cambiando de nivel (solo si se envía nivel)
@@ -403,7 +418,13 @@ static updatelogin = async (req: Request, res: Response) => {
         }
 
         // Actualizar datos del usuario
-        await ResultadoDB.update(userUpdateData, { transaction });
+        // No se envían valores indefinidos: así una edición parcial no borra
+        // información existente ni deja campos obligatorios sin guardar.
+        const cleanUserUpdateData = Object.fromEntries(
+            Object.entries({ ...userUpdateData, ...(Number(userUpdateData.nivel ?? ResultadoDB.nivel) === 2 ? { phone, identityCard } : {}) })
+                .filter(([, value]) => value !== undefined)
+        );
+        await ResultadoDB.update(cleanUserUpdateData, { transaction });
 
         // Si es representante (nivel 1) o sigue siendo representante
         if ((userUpdateData.nivel === 1 || ResultadoDB.nivel === 1) && representativeData) {

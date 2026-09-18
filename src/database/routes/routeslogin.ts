@@ -5,6 +5,7 @@ import { User } from "../../controllers/UserController"; // Ajusta la ruta segú
 import { loginLimiter } from "../../utility/loginLimiter";
 import { authsession } from "../../utility/authsession";
 import { AdminPasswordController } from "../../controllers/AdminPasswordController";
+import { AccountController } from "../../controllers/AccountController";
 
 const RouterUser = Router();
 
@@ -29,6 +30,8 @@ RouterUser.post('/adduser'
     ,body('nivel')
         .optional()
         .isInt({ min: 1 }).withMessage('El nivel debe ser un número entero mayor a 0')
+    ,body('phone').optional().isString().isLength({ min: 7, max: 20 })
+    ,body('identityCard').optional().isString().isLength({ min: 5, max: 20 })
     ,User.adduser
 );
 
@@ -93,6 +96,8 @@ RouterUser.post('/updatelogin',
     body('nivel')
         .optional()
         .isInt({ min: 1 }).withMessage('El nivel debe ser un número entero mayor a 0'),
+    body('phone').optional().isString().isLength({ min: 7, max: 20 }),
+    body('identityCard').optional().isString().isLength({ min: 5, max: 20 }),
     validateRoutes,
     User.updatelogin
 );
@@ -114,6 +119,10 @@ RouterUser.get('/onsession'
     , authsession
     , User.UserActive
 );
+
+RouterUser.get('/account', authsession, AccountController.getAccount);
+RouterUser.post('/account/password-code', authsession, AccountController.requestPasswordCode);
+RouterUser.post('/account/password', authsession, AccountController.resetPassword);
 
 // Estadísticas del sistema
 RouterUser.get('/statistics'

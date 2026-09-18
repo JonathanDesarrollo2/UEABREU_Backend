@@ -10,8 +10,29 @@ import { getErrorLocation } from "../utility/callerinfo";
 import { Op } from "sequelize";
 import { BillingService } from "../services/billingServices";
 import { getCurrentDate } from "../utility/dateHelper";
+import PlanillaCounter from "../database/models/PlanillaCounter";
 
 export class RegistrationManagementController {
+
+  static createForExistingRepresentative = async (req: Request, res: Response) => {
+    const transaction = await sequelize.transaction();
+    try {
+      const representative = await Representative.findOne({ where: { userId: req.tokenData?.id }, transaction });
+      if (!representative) { await transaction.rollback(); return res.status(404).json({ result: false, content: [], error: ['Representante no encontrado'] }); }
+      const { studentData } = req.body;
+      if (!studentData?.fullName || !studentData?.birthDate || !studentData?.identityCard) { await transaction.rollback(); return res.status(400).json({ result: false, content: [], error: ['Nombre, cédula y fecha de nacimiento son obligatorios'] }); }
+      const [counter] = await PlanillaCounter.findOrCreate({ where: {}, defaults: { currentNumber: 1 }, transaction });
+      const planillaNumber = counter.currentNumber;
+      await counter.update({ currentNumber: planillaNumber + 1 }, { transaction });
+      const application = await RegistrationApplication.create({ planillaNumber, userId: req.tokenData!.id, representativeId: representative.id, formSnapshot: { source: 'existing-representative', studentData } }, { transaction });
+      await transaction.commit();
+      return res.status(201).json({ result: true, content: { id: application.id, planillaNumber, message: 'Solicitud enviada correctamente' }, error: [] });
+    } catch (error: any) {
+      await transaction.rollback();
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation('createForExistingRepresentative'));
+      return res.status(500).json({ result: false, content: [], error: ['Error al crear la solicitud'] });
+    }
+  };
 
 static listApplications = async (req: Request, res: Response) => {
   try {
@@ -61,6 +82,7 @@ static listApplications = async (req: Request, res: Response) => {
       userActive: app.user?.userstatus ?? false,
       createdAt: app.createdAt,
       userId: app.userId,
+      isExistingRepresentative: (app.formSnapshot as any)?.source === 'existing-representative',
     }));
 
     res.status(200).json({

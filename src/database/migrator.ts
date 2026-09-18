@@ -14,7 +14,9 @@ export const migrator = new Umzug({
   },
   context: db.getQueryInterface(),
   storage: new SequelizeStorage({ sequelize: db }),
-  logger: console,
+  // Las migraciones se ejecutan de forma explícita al arrancar; no se
+  // imprimen consultas ni detalles de implementación en producción.
+  logger: undefined,
 });
 
 export type Migration = typeof migrator._types.migration;
