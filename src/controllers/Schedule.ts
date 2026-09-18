@@ -643,16 +643,13 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
       return res.status(401).json({ result: false, content: [], error: ['No autenticado'] });
     }
 
-    const representative = await Representative.findOne({
-      where: { userId },
-      include: [{ model: Student, as: 'students' }],
-    });
+    const representative = await Representative.findOne({ where: { userId }, attributes: ['id'] });
 
     if (!representative) {
       return res.status(404).json({ result: false, content: [], error: ['No se encontró representante'] });
     }
 
-    const students = representative.students || [];
+    const students = await Student.findAll({ where: { representativeId: representative.id } });
     if (students.length === 0) {
       return res.json({ result: true, content: [], error: [] });
     }
@@ -690,10 +687,24 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
         ]
       });
 
+      // Si el horario fue configurado para el grado/sección pero todavía no
+      // existe una fila individual en StudentSchedule, también debe ser
+      // visible para el representante.
+      const schedulesBySection = studentSchedules.length > 0
+        ? studentSchedules
+        : (await Schedule.findAll({
+            where: { grade: student.currentGrade, section: student.section },
+            include: [
+              { model: Subject, as: 'subject', include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }] },
+              { model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }
+            ],
+            order: [['day', 'ASC'], ['startBlock', 'ASC']]
+          })).map(schedule => ({ schedule } as any));
+
       const schedulesByDay: Record<string, any[]> = {};
       const blockTimesByDay: Record<string, any[]> = {};
 
-      for (const ss of studentSchedules) {
+      for (const ss of schedulesBySection) {
       const schedule = ss.schedule;
       // ✅ Validar que exista y que los campos usados como índice no sean undefined
       if (!schedule || !schedule.day || !schedule.startBlock || !schedule.endBlock) continue;

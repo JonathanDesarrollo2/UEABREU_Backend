@@ -84,9 +84,17 @@ export class BalanceController {
         distinct: true
       });
 
+      // El total financiero se calcula desde la FK explícita para no depender
+      // de la carga de asociaciones en instalaciones antiguas.
+      const studentsForBalance = await Student.findAll({ attributes: ['representativeId', 'balance'], raw: true });
+      const balanceByRepresentative = studentsForBalance.reduce((totals: Record<string, number>, student: any) => {
+        totals[student.representativeId] = (totals[student.representativeId] || 0) + Number(student.balance || 0);
+        return totals;
+      }, {});
+
       const formattedRepresentatives = representatives
         .map((rep: any) => {
-          const totalBalanceUSD = rep.students?.reduce((sum: number, s: any) => sum + (s.balance || 0), 0) || 0;
+          const totalBalanceUSD = balanceByRepresentative[rep.id!] ?? (rep.students?.reduce((sum: number, s: any) => sum + (s.balance || 0), 0) || 0);
           return {
             id: rep.id,
             fullName: rep.fullName,
