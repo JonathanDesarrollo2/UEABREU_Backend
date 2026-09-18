@@ -13,11 +13,21 @@ const transporter = nodemailer.createTransport({
 
 export class AccountController {
   static getAccount = async (req: Request, res: Response) => {
-    const user = await UserLogin.findByPk(req.tokenData?.id, { attributes: { exclude: ['userpass'] } });
-    if (!user) return res.status(404).json({ result: false, content: [], error: ['Usuario no encontrado'] });
-    const representative = await Representative.findOne({ where: { userId: user.id }, attributes: ['id', 'fullName', 'identityCard', 'phone', 'relationship'] });
-    const students = representative ? await Student.findAll({ where: { representativeId: representative.id }, attributes: ['id', 'fullName', 'identityCard', 'initialSchoolYear', 'currentGrade', 'section', 'status'] }) : [];
-    return res.json({ result: true, content: { ...user.toJSON(), representative: representative ? { ...representative.toJSON(), students } : null }, error: [] });
+    try {
+      const user = await UserLogin.findOne({
+        where: { id: req.tokenData?.id },
+        attributes: ['id', 'usermail', 'userlogin', 'username', 'userstatus', 'nivel']
+      }) || await UserLogin.findOne({
+        where: { usermail: req.tokenData?.usermail },
+        attributes: ['id', 'usermail', 'userlogin', 'username', 'userstatus', 'nivel']
+      });
+      if (!user) return res.status(404).json({ result: false, content: [], error: ['Usuario no encontrado'] });
+      const representative = await Representative.findOne({ where: { userId: user.id }, attributes: ['id', 'fullName', 'identityCard', 'phone', 'relationship'] });
+      const students = representative ? await Student.findAll({ where: { representativeId: representative.id }, attributes: ['id', 'fullName', 'identityCard', 'initialSchoolYear', 'currentGrade', 'section', 'status'] }) : [];
+      return res.json({ result: true, content: { ...user.toJSON(), representative: representative ? { ...representative.toJSON(), students } : null }, error: [] });
+    } catch (error: any) {
+      return res.status(500).json({ result: false, content: [], error: [`Error al cargar información de cuenta: ${error.message}`] });
+    }
   };
 
   static requestPasswordCode = async (req: Request, res: Response) => {
