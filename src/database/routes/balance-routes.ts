@@ -13,7 +13,9 @@ const router = Router();
 router.get('/representatives',
   authsession,
   query('page').optional().isInt({ min: 1 }).toInt(),
-  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  // El dashboard admin solicita limit=1000 para calcular la distribución
+  // completa de estados de pago; con max:100 la validación lo rechazaba.
+  query('limit').optional().isInt({ min: 1, max: 1000 }).toInt(),
   query('fullName').optional().isString(),
   query('identityCard').optional().isString(),
   query('relationship').optional().isIn(['padre', 'madre', 'tutor', 'abuelo', 'otro']),

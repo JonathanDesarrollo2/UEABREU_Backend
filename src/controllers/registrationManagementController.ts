@@ -57,7 +57,7 @@ static listApplications = async (req: Request, res: Response) => {
 
     const { count, rows: applications } = await RegistrationApplication.findAndCountAll({
       where,
-      attributes: ["id", "planillaNumber", "createdAt", "userId", "representativeId"],
+      attributes: ["id", "planillaNumber", "createdAt", "userId", "representativeId", "formSnapshot"],
       include: [
         {
           model: UserLogin,
@@ -65,7 +65,15 @@ static listApplications = async (req: Request, res: Response) => {
         },
         {
           model: Representative,
-          attributes: ["fullName"],
+          attributes: ["id", "fullName"],
+          include: [
+            {
+              model: Student,
+              as: 'students',
+              attributes: ["id", "status"],
+              required: false,
+            },
+          ],
         },
       ],
       order: [["createdAt", sortOrder]],
@@ -74,16 +82,23 @@ static listApplications = async (req: Request, res: Response) => {
       distinct: true,
     });
 
-    const result = applications.map((app) => ({
-      id: app.id,
-      planillaNumber: app.planillaNumber,
-      email: app.user?.usermail,
-      representativeName: app.representative?.fullName,
-      userActive: app.user?.userstatus ?? false,
-      createdAt: app.createdAt,
-      userId: app.userId,
-      isExistingRepresentative: (app.formSnapshot as any)?.source === 'existing-representative',
-    }));
+    const result = applications.map((app) => {
+      const students = (app.representative as any)?.students || [];
+      // "Representante regular": ya tiene al menos un estudiante inscrito
+      // (status 'regular') en el colegio. No altera ningún flujo, solo informa.
+      const isRegularRepresentative = students.some((s: any) => s.status === 'regular');
+      return {
+        id: app.id,
+        planillaNumber: app.planillaNumber,
+        email: app.user?.usermail,
+        representativeName: app.representative?.fullName,
+        userActive: app.user?.userstatus ?? false,
+        createdAt: app.createdAt,
+        userId: app.userId,
+        isExistingRepresentative: (app.formSnapshot as any)?.source === 'existing-representative',
+        isRegularRepresentative,
+      };
+    });
 
     res.status(200).json({
       result: true,
