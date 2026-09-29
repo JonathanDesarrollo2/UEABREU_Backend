@@ -42,6 +42,20 @@ router.get(
   ExchangeRateController.getRatesByMonth
 );
 
+// NUEVO: crear una tasa manual para una fecha valor exacta
+router.post(
+  '/',
+  authsession,
+  body('effectiveDate')
+    .notEmpty().withMessage('La fecha es requerida')
+    .isISO8601().withMessage('La fecha debe tener el formato YYYY-MM-DD'),
+  body('rate')
+    .notEmpty().withMessage('La tasa es requerida')
+    .isFloat({ gt: 0 }).withMessage('La tasa debe ser mayor a 0'),
+  validateRoutes,
+  ExchangeRateController.createRate
+);
+
 // NUEVO: editar la tasa de un registro (solo `rate`)
 router.put(
   '/:id',
