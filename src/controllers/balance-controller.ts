@@ -570,6 +570,21 @@ export class BalanceController {
     }
   };
 
+  // Tasa BCV registrada para una fecha valor exacta (YYYY-MM-DD)
+  static getRateByDate = async (req: Request, res: Response) => {
+    try {
+      const date = String(req.params.date).slice(0, 10);
+      const rate = await BillingService.getRateForDate(date);
+      return res.status(200).json({ result: true, content: { date, rate }, error: [] });
+    } catch (error: any) {
+      if (typeof error?.message === 'string' && error.message.startsWith('No existe una tasa registrada')) {
+        return res.status(404).json({ result: false, content: [], error: ['No existe tasa para la fecha indicada'] });
+      }
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getRateByDate"));
+      return res.status(500).json({ result: false, content: [], error: ['Error al obtener la tasa de la fecha indicada'] });
+    }
+  };
+
   static manualDeposit = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
@@ -669,14 +684,15 @@ export class BalanceController {
     const transaction = await sequelize.transaction();
     try {
       const { id } = req.params;
-      const { amount, description, paymentMethod, reference, createdBy, studentId, paymentTime } = req.body;
+      const { amount, description, paymentMethod, reference, createdBy, studentId, paymentDate, paymentTime } = req.body;
 
       if (!amount || amount <= 0) {
         await transaction.rollback();
         return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
       }
 
-      const bcvRate = await BillingService.getCurrentBCVRate();
+      // Tasa registrada para la fecha del pago (igual que en manualDeposit)
+      const bcvRate = await BillingService.getRateForDate(String(paymentDate).slice(0, 10));
       const amountUSD = amount / bcvRate;
 
       const representative = await Representative.findByPk(id, {

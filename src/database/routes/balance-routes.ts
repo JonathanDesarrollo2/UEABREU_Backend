@@ -1,6 +1,6 @@
 // src/routes/balance-routes.ts
 import { Router } from "express";
-import { body, param, query } from "express-validator"; 
+import { body, param, query } from "express-validator";
 import { validateRoutes } from "../../middleware/validateRoutes";
 import { BalanceController } from "../../controllers/balance-controller";
 import { authsession } from "../../utility/authsession";
@@ -97,10 +97,19 @@ router.post('/representative/:id/withdraw',
   body('description').optional().isString().isLength({ max: 500 }),
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
-  body('paymentDate').optional().isISO8601().withMessage('Fecha de pago inválida'),
+  // 🔧 FIX Tarea 2: la fecha del pago es obligatoria (se usa para la tasa histórica)
+  body('paymentDate').notEmpty().isISO8601().withMessage('La fecha del pago es obligatoria'),
   body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
   BalanceController.manualWithdrawal
+);
+
+// Tasa BCV registrada para una fecha valor exacta (YYYY-MM-DD)
+router.get('/rate/:date',
+  authsession,
+  param('date').isISO8601().withMessage('Fecha inválida'),
+  validateRoutes,
+  BalanceController.getRateByDate
 );
 
 // ========== VERIFICACIONES ==========
@@ -134,16 +143,17 @@ router.get('/statistics/financial',
 );
 
 // Transacciones recientes (para dashboard)
-router.get('/transactions/recent', 
+router.get('/transactions/recent',
   authsession,
   query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
   validateRoutes,
   BalanceController.getRecentTransactions
 );
-router.get('/representative-by-email', 
-  BalanceController.getRepresentativeByEmail);
 
-  // src/routes/balance-routes.ts
+router.get('/representative-by-email',
+  BalanceController.getRepresentativeByEmail
+);
+
 router.get('/transactions',
   authsession,
   query('page').optional().isInt({ min: 1 }).toInt(),
@@ -190,6 +200,7 @@ router.post('/transaction/move',
   validateRoutes,
   BalanceController.movePaymentBetweenStudents
 );
+
 // ========== RANKING DE ESTUDIANTES ==========
 router.get('/students-ranking',
   authsession,
@@ -204,4 +215,5 @@ router.get('/students-ranking',
   validateRoutes,
   BalanceController.getStudentsRanking
 );
+
 export default router;
