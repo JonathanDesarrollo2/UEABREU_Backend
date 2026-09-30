@@ -460,15 +460,19 @@ static getNextPlanillaNumber = async (req: Request, res: Response) => {
           `
         });
         console.log(`📧 Código de recuperación enviado a ${user.usermail}`);
-      } catch (emailError: any) {
-        console.error("⚠️ Error al enviar correo de recuperación:", emailError);
-        await transaction.rollback();
-        return res.status(500).json({
-          result: false,
-          content: [],
-          error: [`No se pudo enviar el correo: ${emailError?.message || 'Error desconocido'}`]
-        });
-      }
+        } catch (emailError: any) {
+          console.error("⚠️ Error al enviar correo de recuperación:", emailError);
+          // No hacemos rollback: el código ya se guardó, así el usuario puede
+          // reintentar sin perder el contador de intentos.
+          await transaction.commit();
+          return res.status(200).json({
+            result: true,
+            content: {
+              message: "Si el correo está registrado, recibirás un código en unos minutos."
+            },
+            error: []
+          });
+        }
 
       await transaction.commit();
 
