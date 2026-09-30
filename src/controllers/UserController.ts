@@ -21,13 +21,29 @@ const getTotalBalance = async (representativeId: string): Promise<number> => {
   const students = await Student.findAll({ where: { representativeId } });
   return students.reduce((sum, s) => sum + (s.balance || 0), 0);
 };
+// Helper: convierte Bs->USD sin reventar si no hay tasa registrada del día.
+// Devuelve 0 en caso de fallo y deja un aviso en consola.
+const convertSafeLocal = async (amountBs: number): Promise<number> => {
+  if (!amountBs || amountBs <= 0) return 0;
+  try {
+    const bcvRate = await BillingService.getCurrentBCVRate();
+    return amountBs / bcvRate;
+  } catch (err: any) {
+    console.warn(
+      '[adduser] No se pudo convertir Bs a USD (tasa no disponible):',
+      err?.message || err
+    );
+    return 0;
+  }
+};
 
 export class User {
-        //#region: Crear usuarios Nuevos post('/adduser')
+            //#region: Crear usuarios Nuevos post('/adduser')
     private static async convertBsToUSD(amountBs: number): Promise<number> {
     const bcvRate = await BillingService.getCurrentBCVRate();
     return amountBs / bcvRate;
     }
+    //#region: Crear usuarios Nuevos post('/adduser')
 static adduser = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
 
@@ -81,6 +97,45 @@ static adduser = async (req: Request, res: Response) => {
             }
         }
 
+        // ✅ NUEVA VALIDACIÓN PREVIA: si algún estudiante tiene una cédula ya
+        // registrada, abortamos TODO (no se crea usuario, ni representante,
+        // ni estudiantes) y devolvemos un mensaje claro para que el frontend
+        // muestre la alerta y bloquee el registro.
+        if (
+            Number(userFields.nivel) === 1 &&
+            studentsData &&
+            Array.isArray(studentsData) &&
+            studentsData.length > 0
+        ) {
+            const cedulas = studentsData
+                .map((s: any) => (typeof s?.identityCard === 'string' ? s.identityCard.trim() : ''))
+                .filter((c: string) => c.length > 0);
+
+            if (cedulas.length > 0) {
+                const duplicados = await Student.findAll({
+                    where: { identityCard: { [Op.in]: cedulas } },
+                    attributes: ['identityCard', 'fullName'],
+                    transaction
+                });
+
+                if (duplicados.length > 0) {
+                    await transaction.rollback();
+                    const detalle = duplicados
+                        .map((d: any) => `${d.identityCard} (${d.fullName})`)
+                        .join(', ');
+                    return res.status(409).json({
+                        result: false,
+                        content: [],
+                        error: [
+                            duplicados.length === 1
+                                ? `Ya existe un estudiante registrado con la cédula ${detalle}. Verifica los datos e intenta nuevamente.`
+                                : `Ya existen estudiantes registrados con las siguientes cédulas: ${detalle}. Verifica los datos e intenta nuevamente.`
+                        ]
+                    });
+                }
+            }
+        }
+
         // Crear el usuario
         const newUser = await UserLogin.create({
             ...userFields,
@@ -90,21 +145,6 @@ static adduser = async (req: Request, res: Response) => {
             // Solo se persisten para el usuario administrativo (nivel 2).
             ...(Number(userFields.nivel) === 2 ? { phone, identityCard } : {})
         }, { transaction });
-
-        // Helper local: convierte Bs->USD sin reventar si no hay tasa registrada
-        // para la fecha exacta de hoy. Devuelve 0 en caso de fallo y deja aviso.
-        const convertSafe = async (amountBs: number): Promise<number> => {
-            if (!amountBs || amountBs <= 0) return 0;
-            try {
-                return await User.convertBsToUSD(amountBs);
-            } catch (err: any) {
-                console.warn(
-                    '[adduser] No se pudo convertir Bs a USD (tasa no disponible):',
-                    err?.message || err
-                );
-                return 0;
-            }
-        };
 
         // Si es representante (nivel 1) Y hay datos de representante
         if (newUser.nivel === 1 && representativeData) {
@@ -139,7 +179,7 @@ static adduser = async (req: Request, res: Response) => {
                             console.log(`[adduser] Procesando ${studentsData.length} estudiante(s)...`);
 
                             const initialBalance = Number(representativeData.initialBalance) || 0;
-                            const initialBalanceUSD = await convertSafe(initialBalance);
+                            const initialBalanceUSD = await convertSafeLocal (initialBalance);
                             const perStudentBalanceUSD = studentsData.length > 0 ? initialBalanceUSD / studentsData.length : 0;
 
                             let createdCount = 0;
@@ -172,10 +212,9 @@ static adduser = async (req: Request, res: Response) => {
                                 let newStudent: Student | null = null;
 
                                 try {
-                                    // Solo convertir si hay balance > 0 (evita el throw innecesario)
                                     const rawBalance = Number(studentData.balance) || 0;
                                     const studentBalanceUSD = rawBalance > 0
-                                        ? await convertSafe(rawBalance)
+                                        ? await convertSafeLocal(rawBalance)
                                         : perStudentBalanceUSD;
 
                                     const typedStudentData = studentData as any;
