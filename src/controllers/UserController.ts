@@ -23,7 +23,7 @@ const getTotalBalance = async (representativeId: string): Promise<number> => {
 };
 
 export class User {
-    //#region: Crear usuarios Nuevos post('/adduser')
+        //#region: Crear usuarios Nuevos post('/adduser')
     private static async convertBsToUSD(amountBs: number): Promise<number> {
     const bcvRate = await BillingService.getCurrentBCVRate();
     return amountBs / bcvRate;
@@ -120,15 +120,15 @@ static adduser = async (req: Request, res: Response) => {
                             userId: newUser.id
                         }, { transaction });
 
-                        // CREAR ESTUDIANTES con balance individual y fecha de ingreso
+                        // CREAR ESTUDIANTES con savepoints para aislar fallos
                         if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
                             const initialBalance = representativeData.initialBalance || 0;
-                            // ✅ Convertir saldo inicial a USD
                             const initialBalanceUSD = initialBalance > 0 ? await User.convertBsToUSD(initialBalance) : 0;
                             const perStudentBalanceUSD = studentsData.length > 0 ? initialBalanceUSD / studentsData.length : 0;
 
                             for (const studentData of studentsData) {
                                 if (!studentData.identityCard || !studentData.fullName) {
+                                    console.warn('[adduser] Estudiante sin identityCard o fullName, se omite:', studentData);
                                     continue;
                                 }
 
@@ -137,61 +137,92 @@ static adduser = async (req: Request, res: Response) => {
                                     transaction
                                 });
 
-                                if (!existingStudent) {
+                                if (existingStudent) {
+                                    console.warn(`[adduser] Estudiante con cédula ${studentData.identityCard} ya existe, se omite.`);
+                                    continue;
+                                }
+
+                                // ✅ Savepoint 1: crear el estudiante de forma aislada
+                                const studentSavepoint = await sequelize.transaction({ transaction });
+                                let newStudent: Student | null = null;
+
+                                try {
+                                    let studentBalanceUSD: number;
+                                    if (studentData.balance !== undefined) {
+                                        studentBalanceUSD = await User.convertBsToUSD(studentData.balance);
+                                    } else {
+                                        studentBalanceUSD = perStudentBalanceUSD;
+                                    }
+
+                                    const typedStudentData = studentData as any;
+                                    let admissionDate = await getCurrentDate();
+                                    if (typedStudentData.admissionDate) {
+                                        const parsedDate = new Date(typedStudentData.admissionDate);
+                                        if (!isNaN(parsedDate.getTime())) {
+                                            admissionDate = parsedDate;
+                                        }
+                                    }
+
+                                    newStudent = await Student.create({
+                                        fullName: studentData.fullName,
+                                        identityCard: studentData.identityCard,
+                                        birthDate: new Date(studentData.birthDate),
+                                        state: studentData.state,
+                                        zone: studentData.zone,
+                                        addressDescription: studentData.addressDescription,
+                                        phone: studentData.phone || '',
+                                        nationality: studentData.nationality,
+                                        birthCountry: studentData.birthCountry,
+                                        hasAllergies: studentData.hasAllergies,
+                                        allergiesDescription: studentData.allergiesDescription || '',
+                                        hasDiseases: studentData.hasDiseases,
+                                        diseasesDescription: studentData.diseasesDescription || '',
+                                        emergencyContact: studentData.emergencyContact,
+                                        emergencyPhone: studentData.emergencyPhone,
+                                        representativeId: newRepresentative.id,
+                                        userId: newUser.id,
+                                        status: studentData.status || 'pendiente',
+                                        admissionDate: admissionDate,
+                                        initialSchoolYear: new Date().getFullYear().toString(),
+                                        currentGrade: studentData.currentGrade || 'En asignar',
+                                        section: studentData.section || 'Pendiente',
+                                        balance: studentBalanceUSD
+                                    }, { transaction: studentSavepoint });
+
+                                    await studentSavepoint.commit();
+                                } catch (studentError: any) {
+                                    await studentSavepoint.rollback();
+                                    console.error('[adduser] Error al crear estudiante:', studentError?.message || studentError);
+                                    ErrorLog.createErrorLog(
+                                        studentError,
+                                        'Server',
+                                        getErrorLocation("adduser:createStudent")
+                                    );
+                                    continue; // siguiente estudiante; la transacción padre sigue viva
+                                }
+
+                                // ✅ Savepoint 2: aplicar cuotas (si falla, el estudiante ya quedó creado)
+                                if (newStudent && newStudent.id) {
+                                    const feeSavepoint = await sequelize.transaction({ transaction });
                                     try {
-                                        // ✅ Determinar balance en USD
-                                        let studentBalanceUSD: number;
-                                        if (studentData.balance !== undefined) {
-                                            // Si viene balance, asumimos que está en Bs y lo convertimos
-                                            studentBalanceUSD = await User.convertBsToUSD(studentData.balance);
-                                        } else {
-                                            studentBalanceUSD = perStudentBalanceUSD;
-                                        }
-
-                                        // ✅ Cast para admitir admissionDate
-                                        const typedStudentData = studentData as any;
-                                        let admissionDate = await getCurrentDate();
-                                        if (typedStudentData.admissionDate) {
-                                            const parsedDate = new Date(typedStudentData.admissionDate);
-                                            if (!isNaN(parsedDate.getTime())) {
-                                                admissionDate = parsedDate;
-                                            }
-                                        }
-
-                                        const newStudent = await Student.create({
-                                            fullName: studentData.fullName,
-                                            identityCard: studentData.identityCard,
-                                            birthDate: new Date(studentData.birthDate),
-                                            state: studentData.state,
-                                            zone: studentData.zone,
-                                            addressDescription: studentData.addressDescription,
-                                            phone: studentData.phone || '',
-                                            nationality: studentData.nationality,
-                                            birthCountry: studentData.birthCountry,
-                                            hasAllergies: studentData.hasAllergies,
-                                            allergiesDescription: studentData.allergiesDescription || '',
-                                            hasDiseases: studentData.hasDiseases,
-                                            diseasesDescription: studentData.diseasesDescription || '',
-                                            emergencyContact: studentData.emergencyContact,
-                                            emergencyPhone: studentData.emergencyPhone,
-                                            representativeId: newRepresentative.id,
-                                            userId: newUser.id,
-                                            status: studentData.status || 'pendiente',
-                                            admissionDate: admissionDate,
-                                            initialSchoolYear: new Date().getFullYear().toString(),
-                                            currentGrade: studentData.currentGrade || 'En asignar',
-                                            section: studentData.section || 'Pendiente',
-                                            balance: studentBalanceUSD  // ✅ en USD
-                                        }, { transaction });
-
-                                        // ✅ Aplicar cuotas según la fecha de ingreso
                                         await BillingService.applyFeesBasedOnAdmission(
-                                            newStudent.id!,
+                                            newStudent.id,
                                             newRepresentative.id!,
-                                            transaction  // usar la transacción actual
+                                            feeSavepoint
                                         );
-                                    } catch (studentError: any) {
-                                        console.error('Error creando estudiante o aplicando cuotas:', studentError);
+                                        await feeSavepoint.commit();
+                                    } catch (feeError: any) {
+                                        await feeSavepoint.rollback();
+                                        console.error(
+                                            `[adduser] Estudiante ${newStudent.fullName} creado, pero fallaron las cuotas:`,
+                                            feeError?.message || feeError
+                                        );
+                                        ErrorLog.createErrorLog(
+                                            feeError,
+                                            'Server',
+                                            getErrorLocation("adduser:applyFees")
+                                        );
+                                        // No hacemos continue: el estudiante ya está creado, solo faltan las cuotas.
                                     }
                                 }
                             }
@@ -227,60 +258,6 @@ static adduser = async (req: Request, res: Response) => {
     }
 };
 //#endregion
-
-    //#region: Verificar Contraseñas con confirmación de contraseña
-    static ComparePass = async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            const { userpass, userrepass } = req.body;
-            if (userpass !== userrepass) {
-                res.status(202).json({ result: false, content: [], error: ['Las contraseñas no coinciden'] });
-                return;
-            };
-            next();
-        } catch (error) {
-            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("ComparePass"));
-            res.status(500).json({ result: false, content: [], error: ['Error comprobando las contraseñas'] });
-        }
-    };
-    //#endregion
-
-    //#region: Verificar si el Email esta Ocupado o Disponible
-    static CheckEmailExists = async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            const LoginData: typeuserlogin_full = req.body;
-            if (LoginData.usermail) {
-                const existingEmail = await UserLogin.findOne({ where: { usermail: LoginData.usermail } });
-                if (existingEmail) {
-                    res.status(202).json({ result: false, content: [], error: [`El email ${LoginData.usermail} ya fue asignado a otro usuario`] });
-                    return;
-                }
-            }
-            next();
-        } catch (error) {
-            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("CheckEmailExists"));
-            res.status(500).json({ result: false, content: [], error: ['Error comprobando Email'] });
-        }
-    };
-    //#endregion
-
-    //#region: Verificar si el Login esta Ocupado o Disponible
-    static CheckUserIDExists = async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            const LoginData: typeuserlogin_full = req.body;
-            if (LoginData.userlogin) {
-                const existingLogin = await UserLogin.findOne({ where: { userlogin: LoginData.userlogin } });
-                if (existingLogin) {
-                    res.status(202).json({ result: false, content: [], error: [`El login ${LoginData.userlogin} ya fue asignado a otro usuario`] });
-                    return;
-                }
-            }
-            next();
-        } catch (error) {
-            ErrorLog.createErrorLog(error, 'Server', getErrorLocation("CheckUserIDExists"));
-            res.status(500).json({ result: false, content: [], error: ['Error comprobando login del usuario'] });
-        }
-    };
-    //#endregion
 
     //#region Eliminar Usuarios post('/removelogin')
     static removelogin = async (req: Request, res: Response) => {
