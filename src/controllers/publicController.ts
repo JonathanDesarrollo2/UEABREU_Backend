@@ -460,8 +460,14 @@ static getNextPlanillaNumber = async (req: Request, res: Response) => {
           `
         });
         console.log(`📧 Código de recuperación enviado a ${user.usermail}`);
-      } catch (emailError) {
+      } catch (emailError: any) {
         console.error("⚠️ Error al enviar correo de recuperación:", emailError);
+        await transaction.rollback();
+        return res.status(500).json({
+          result: false,
+          content: [],
+          error: [`No se pudo enviar el correo: ${emailError?.message || 'Error desconocido'}`]
+        });
       }
 
       await transaction.commit();
