@@ -84,6 +84,27 @@ export default class UserLogin extends Model<typeuserlogin_full> {
   @AllowNull(true)
   @Column({ type: DataType.STRING(20) })
   declare identityCard?: string | null;
+    // ── Campos para recuperación de contraseña ──────────────────────
+  @AllowNull(true)
+  @Default(null)
+  @Column({ type: DataType.STRING(255) })
+  declare passwordResetCode?: string | null;   // código hasheado (bcrypt)
+
+  @AllowNull(true)
+  @Default(null)
+  @Column({ type: DataType.DATE })
+  declare passwordResetCodeExpires?: Date | null;
+
+  @AllowNull(true)
+  @Default(0)
+  @Column({ type: DataType.INTEGER })
+  declare passwordResetRequestCount?: number | null;
+
+  @AllowNull(true)
+  @Default(null)
+  @Column({ type: DataType.DATE })
+  declare passwordResetWindowStart?: Date | null;
+  // ────────────────────────────────────────────────────────────────
 
   // Hash password antes de crear Y actualizar
   @BeforeCreate

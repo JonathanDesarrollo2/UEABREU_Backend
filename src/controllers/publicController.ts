@@ -7,6 +7,7 @@ import Student from "../database/models/student";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import PlanillaCounter from "../database/models/PlanillaCounter";
+import bcrypt from "bcrypt";
 import RegistrationApplication from "../database/models/RegistrationAplicattion";
 
 
@@ -382,4 +383,205 @@ static getNextPlanillaNumber = async (req: Request, res: Response) => {
     res.status(500).json({ result: false, content: [], error: ['Error al obtener el número de planilla'] });
   }
 };
+  // ====================================================================
+  // POST /forgot-password  →  solicita código de recuperación
+  // ====================================================================
+  static forgotPassword = async (req: Request, res: Response) => {
+    const transaction = await sequelize.transaction();
+    try {
+      const { email } = req.body;
+      const genericMessage =
+        "Si el correo está registrado, recibirás un código de recuperación en unos minutos.";
+
+      if (!email || typeof email !== "string") {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ["Email válido requerido"] });
+      }
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const user = await UserLogin.findOne({ where: { usermail: normalizedEmail }, transaction });
+
+      // Anti-enumeración: si no existe, respondemos igual
+      if (!user) {
+        await transaction.commit();
+        return res.status(200).json({
+          result: true,
+          content: { message: genericMessage },
+          error: []
+        });
+      }
+
+      // ── Rate limit: 3 solicitudes por ventana de 24h ──────────────
+      const now = new Date();
+      const windowStart = user.passwordResetWindowStart ? new Date(user.passwordResetWindowStart) : null;
+      const hoursSinceWindow = windowStart
+        ? (now.getTime() - windowStart.getTime()) / (1000 * 60 * 60)
+        : Infinity;
+
+      let currentCount = Number(user.passwordResetRequestCount) || 0;
+
+      // Si la ventana ya expiró (>24h), reiniciamos contador
+      if (!windowStart || hoursSinceWindow >= 24) {
+        currentCount = 0;
+        user.passwordResetWindowStart = now;
+      }
+
+      if (currentCount >= 3) {
+        await transaction.commit();
+        return res.status(429).json({
+          result: false,
+          content: [],
+          error: ["Has alcanzado el límite de 3 solicitudes en 24 horas. Intenta nuevamente más tarde."]
+        });
+      }
+
+      // ── Generar código de 6 dígitos y hashearlo ───────────────────
+      const rawCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const hashedCode = await bcrypt.hash(rawCode, 10);
+
+      user.passwordResetCode = hashedCode;
+      user.passwordResetCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 min
+      user.passwordResetRequestCount = currentCount + 1;
+      await user.save({ transaction });
+
+      // ── Enviar correo (no rompe la transacción si falla) ──────────
+      try {
+        await transporter.sendMail({
+          from: process.env.EMAIL_FROM || '"U.E. Antonio Abreu" <uejantonioabreu@gmail.com>',
+          to: user.usermail,
+          subject: "Recuperación de contraseña - U.E. Antonio Abreu",
+          html: `
+            <h2>Recuperación de contraseña</h2>
+            <p>Tu código de recuperación es: <strong style="font-size:22px;letter-spacing:4px;">${rawCode}</strong></p>
+            <p>Este código expira en 15 minutos.</p>
+            <p>Si no solicitaste este cambio, ignora este mensaje. Tu contraseña actual seguirá vigente.</p>
+            <hr />
+            <p style="color:#666;font-size:12px;">U.E. José Antonio Abreu — Formando líderes del mañana</p>
+          `
+        });
+        console.log(`📧 Código de recuperación enviado a ${user.usermail}`);
+      } catch (emailError) {
+        console.error("⚠️ Error al enviar correo de recuperación:", emailError);
+      }
+
+      await transaction.commit();
+
+      return res.status(200).json({
+        result: true,
+        content: {
+          message: genericMessage,
+          remainingAttempts: 3 - (currentCount + 1)
+        },
+        error: []
+      });
+    } catch (error: any) {
+      await transaction.rollback();
+      ErrorLog.createErrorLog(error, "Server", getErrorLocation("forgotPassword"));
+      return res.status(500).json({ result: false, content: [], error: ["Error al procesar la solicitud"] });
+    }
+  };
+
+  // ====================================================================
+  // POST /verify-reset-code  →  valida el código sin consumirlo
+  // ====================================================================
+  static verifyResetCode = async (req: Request, res: Response) => {
+    try {
+      const { email, code } = req.body;
+
+      if (!email || !code) {
+        return res.status(400).json({ result: false, content: [], error: ["Email y código son requeridos"] });
+      }
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const user = await UserLogin.findOne({ where: { usermail: normalizedEmail } });
+
+      if (!user || !user.passwordResetCode || !user.passwordResetCodeExpires) {
+        return res.status(400).json({ result: false, content: [], error: ["Solicitud de recuperación inválida o expirada"] });
+      }
+
+      if (new Date() > new Date(user.passwordResetCodeExpires)) {
+        return res.status(400).json({ result: false, content: [], error: ["El código ha expirado. Solicita uno nuevo."] });
+      }
+
+      const match = await bcrypt.compare(String(code), user.passwordResetCode);
+      if (!match) {
+        return res.status(400).json({ result: false, content: [], error: ["Código de recuperación incorrecto"] });
+      }
+
+      return res.status(200).json({
+        result: true,
+        content: { message: "Código verificado correctamente" },
+        error: []
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, "Server", getErrorLocation("verifyResetCode"));
+      return res.status(500).json({ result: false, content: [], error: ["Error al verificar el código"] });
+    }
+  };
+
+  // ====================================================================
+  // POST /reset-password  →  actualiza la contraseña con código válido
+  // ====================================================================
+  static resetPassword = async (req: Request, res: Response) => {
+    const transaction = await sequelize.transaction();
+    try {
+      const { email, code, newPassword, confirmPassword } = req.body;
+
+      if (!email || !code || !newPassword || !confirmPassword) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ["Todos los campos son requeridos"] });
+      }
+
+      if (newPassword !== confirmPassword) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ["Las contraseñas no coinciden"] });
+      }
+
+      if (typeof newPassword !== "string" || newPassword.length < 6) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ["La contraseña debe tener al menos 6 caracteres"] });
+      }
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const user = await UserLogin.findOne({ where: { usermail: normalizedEmail }, transaction });
+
+      if (!user || !user.passwordResetCode || !user.passwordResetCodeExpires) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ["Solicitud de recuperación inválida"] });
+      }
+
+      if (new Date() > new Date(user.passwordResetCodeExpires)) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ["El código ha expirado. Solicita uno nuevo."] });
+      }
+
+      const match = await bcrypt.compare(String(code), user.passwordResetCode);
+      if (!match) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ["Código de recuperación incorrecto"] });
+      }
+
+      // Asignar nueva contraseña. El hook @BeforeUpdate del modelo la hashea.
+      user.userpass = newPassword;
+
+      // Limpiar campos de recuperación y reiniciar contador
+      user.passwordResetCode = null;
+      user.passwordResetCodeExpires = null;
+      user.passwordResetRequestCount = 0;
+      user.passwordResetWindowStart = null;
+
+      await user.save({ transaction });
+      await transaction.commit();
+
+      return res.status(200).json({
+        result: true,
+        content: { message: "Contraseña actualizada correctamente" },
+        error: []
+      });
+    } catch (error: any) {
+      await transaction.rollback();
+      ErrorLog.createErrorLog(error, "Server", getErrorLocation("resetPassword"));
+      return res.status(500).json({ result: false, content: [], error: ["Error al actualizar la contraseña"] });
+    }
+  };
 }
