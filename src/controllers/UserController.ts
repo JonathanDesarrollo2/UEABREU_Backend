@@ -28,7 +28,6 @@ export class User {
     const bcvRate = await BillingService.getCurrentBCVRate();
     return amountBs / bcvRate;
     }
-    //#region: Crear usuarios Nuevos post('/adduser')
 static adduser = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
 
@@ -92,6 +91,21 @@ static adduser = async (req: Request, res: Response) => {
             ...(Number(userFields.nivel) === 2 ? { phone, identityCard } : {})
         }, { transaction });
 
+        // Helper local: convierte Bs->USD sin reventar si no hay tasa registrada
+        // para la fecha exacta de hoy. Devuelve 0 en caso de fallo y deja aviso.
+        const convertSafe = async (amountBs: number): Promise<number> => {
+            if (!amountBs || amountBs <= 0) return 0;
+            try {
+                return await User.convertBsToUSD(amountBs);
+            } catch (err: any) {
+                console.warn(
+                    '[adduser] No se pudo convertir Bs a USD (tasa no disponible):',
+                    err?.message || err
+                );
+                return 0;
+            }
+        };
+
         // Si es representante (nivel 1) Y hay datos de representante
         if (newUser.nivel === 1 && representativeData) {
 
@@ -122,13 +136,23 @@ static adduser = async (req: Request, res: Response) => {
 
                         // CREAR ESTUDIANTES con savepoints para aislar fallos
                         if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
-                            const initialBalance = representativeData.initialBalance || 0;
-                            const initialBalanceUSD = initialBalance > 0 ? await User.convertBsToUSD(initialBalance) : 0;
+                            console.log(`[adduser] Procesando ${studentsData.length} estudiante(s)...`);
+
+                            const initialBalance = Number(representativeData.initialBalance) || 0;
+                            const initialBalanceUSD = await convertSafe(initialBalance);
                             const perStudentBalanceUSD = studentsData.length > 0 ? initialBalanceUSD / studentsData.length : 0;
+
+                            let createdCount = 0;
+                            let skippedCount = 0;
+                            let failedCount = 0;
 
                             for (const studentData of studentsData) {
                                 if (!studentData.identityCard || !studentData.fullName) {
-                                    console.warn('[adduser] Estudiante sin identityCard o fullName, se omite:', studentData);
+                                    console.warn('[adduser] Estudiante sin identityCard o fullName, se omite:', {
+                                        fullName: studentData.fullName,
+                                        identityCard: studentData.identityCard,
+                                    });
+                                    skippedCount++;
                                     continue;
                                 }
 
@@ -139,6 +163,7 @@ static adduser = async (req: Request, res: Response) => {
 
                                 if (existingStudent) {
                                     console.warn(`[adduser] Estudiante con cédula ${studentData.identityCard} ya existe, se omite.`);
+                                    skippedCount++;
                                     continue;
                                 }
 
@@ -147,12 +172,11 @@ static adduser = async (req: Request, res: Response) => {
                                 let newStudent: Student | null = null;
 
                                 try {
-                                    let studentBalanceUSD: number;
-                                    if (studentData.balance !== undefined) {
-                                        studentBalanceUSD = await User.convertBsToUSD(studentData.balance);
-                                    } else {
-                                        studentBalanceUSD = perStudentBalanceUSD;
-                                    }
+                                    // Solo convertir si hay balance > 0 (evita el throw innecesario)
+                                    const rawBalance = Number(studentData.balance) || 0;
+                                    const studentBalanceUSD = rawBalance > 0
+                                        ? await convertSafe(rawBalance)
+                                        : perStudentBalanceUSD;
 
                                     const typedStudentData = studentData as any;
                                     let admissionDate = await getCurrentDate();
@@ -190,15 +214,21 @@ static adduser = async (req: Request, res: Response) => {
                                     }, { transaction: studentSavepoint });
 
                                     await studentSavepoint.commit();
+                                    createdCount++;
+                                    console.log(`[adduser] ✓ Estudiante creado: ${newStudent.fullName} (${newStudent.identityCard})`);
                                 } catch (studentError: any) {
                                     await studentSavepoint.rollback();
-                                    console.error('[adduser] Error al crear estudiante:', studentError?.message || studentError);
+                                    failedCount++;
+                                    console.error(
+                                        '[adduser] ✗ Error al crear estudiante:',
+                                        studentError?.message || studentError
+                                    );
                                     ErrorLog.createErrorLog(
                                         studentError,
                                         'Server',
                                         getErrorLocation("adduser:createStudent")
                                     );
-                                    continue; // siguiente estudiante; la transacción padre sigue viva
+                                    continue;
                                 }
 
                                 // ✅ Savepoint 2: aplicar cuotas (si falla, el estudiante ya quedó creado)
@@ -213,7 +243,7 @@ static adduser = async (req: Request, res: Response) => {
                                         await feeSavepoint.commit();
                                     } catch (feeError: any) {
                                         await feeSavepoint.rollback();
-                                        console.error(
+                                        console.warn(
                                             `[adduser] Estudiante ${newStudent.fullName} creado, pero fallaron las cuotas:`,
                                             feeError?.message || feeError
                                         );
@@ -222,10 +252,15 @@ static adduser = async (req: Request, res: Response) => {
                                             'Server',
                                             getErrorLocation("adduser:applyFees")
                                         );
-                                        // No hacemos continue: el estudiante ya está creado, solo faltan las cuotas.
                                     }
                                 }
                             }
+
+                            console.log(
+                                `[adduser] Resumen estudiantes → creados: ${createdCount}, omitidos: ${skippedCount}, fallidos: ${failedCount}`
+                            );
+                        } else {
+                            console.warn('[adduser] No se recibió studentsData o está vacío.');
                         }
                     } catch (repError: any) {
                         console.error('Error creando representante:', repError);
