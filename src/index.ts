@@ -63,7 +63,12 @@ async function startServer() {
       console.log(colors.yellow.bold("⚠️  Servidor iniciado SIN conexión a BD - Modo Público"));
     }
 
-    server.listen(port, () => {
+    const httpServer = server.listen(port, () => {
+      const addr = httpServer.address();
+      const bind = typeof addr === 'object' && addr ? `${addr.address}:${addr.port}` : addr;
+      console.log(colors.green.bold(`🚀 Servidor escuchando en el puerto: ${port}`));
+      console.log(colors.gray(`   Dirección de escucha (bind): ${bind} | Entorno: ${process.env.NODE_ENV || 'development'}`));
+      console.log(colors.gray(`   URL base local: http://localhost:${port}/api`));
     });
     if (dbConnected) {
       startDebtScheduler();

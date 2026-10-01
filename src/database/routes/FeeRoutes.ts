@@ -26,5 +26,9 @@ FeeRoutes.put('/fees/:schoolYear',
   validateRoutes,
   FeeController.updateFees
 );
+FeeRoutes.get('/fees/audit-logs',
+  authsession,
+  FeeController.getAuditLogs
+);
 
 export default FeeRoutes;

@@ -1,6 +1,6 @@
 // src/routes/balance-routes.ts
 import { Router } from "express";
-import { body, param, query } from "express-validator"; 
+import { body, param, query } from "express-validator";
 import { validateRoutes } from "../../middleware/validateRoutes";
 import { BalanceController } from "../../controllers/balance-controller";
 import { authsession } from "../../utility/authsession";
@@ -13,7 +13,9 @@ const router = Router();
 router.get('/representatives',
   authsession,
   query('page').optional().isInt({ min: 1 }).toInt(),
-  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  // El dashboard admin solicita limit=1000 para calcular la distribución
+  // completa de estados de pago; con max:100 la validación lo rechazaba.
+  query('limit').optional().isInt({ min: 1, max: 1000 }).toInt(),
   query('fullName').optional().isString(),
   query('identityCard').optional().isString(),
   query('relationship').optional().isIn(['padre', 'madre', 'tutor', 'abuelo', 'otro']),
@@ -79,8 +81,8 @@ router.post('/representative/:id/deposit',
   body('description').optional().isString().isLength({ max: 500 }),
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
-  body('createdBy').optional().isUUID(),
   body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
+  body('paymentDate').notEmpty().isISO8601().withMessage('La fecha del pago es obligatoria'),
   validateRoutes,
   BalanceController.manualDeposit
 );
@@ -95,10 +97,19 @@ router.post('/representative/:id/withdraw',
   body('description').optional().isString().isLength({ max: 500 }),
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
-  body('createdBy').optional().isUUID(),
+  // 🔧 FIX Tarea 2: la fecha del pago es obligatoria (se usa para la tasa histórica)
+  body('paymentDate').notEmpty().isISO8601().withMessage('La fecha del pago es obligatoria'),
   body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
   BalanceController.manualWithdrawal
+);
+
+// Tasa BCV registrada para una fecha valor exacta (YYYY-MM-DD)
+router.get('/rate/:date',
+  authsession,
+  param('date').isISO8601().withMessage('Fecha inválida'),
+  validateRoutes,
+  BalanceController.getRateByDate
 );
 
 // ========== VERIFICACIONES ==========
@@ -132,16 +143,17 @@ router.get('/statistics/financial',
 );
 
 // Transacciones recientes (para dashboard)
-router.get('/transactions/recent', 
+router.get('/transactions/recent',
   authsession,
   query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
   validateRoutes,
   BalanceController.getRecentTransactions
 );
-router.get('/representative-by-email', 
-  BalanceController.getRepresentativeByEmail);
 
-  // src/routes/balance-routes.ts
+router.get('/representative-by-email',
+  BalanceController.getRepresentativeByEmail
+);
+
 router.get('/transactions',
   authsession,
   query('page').optional().isInt({ min: 1 }).toInt(),
@@ -153,9 +165,55 @@ router.get('/transactions',
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
   query('search').optional().isString(),
+  query('createdByRole').optional().isIn(['admin', 'representative', 'system']),
+  query('balanceStatus').optional().isIn(['all', 'debtors', 'creditors']),
+  query('studentGrade').optional().isString(),
+  query('studentSection').optional().isString(),
   query('sortBy').optional().isIn(['createdAt', 'amount', 'type', 'student.fullName']),
   query('sortOrder').optional().isIn(['asc', 'desc']),
   validateRoutes,
   BalanceController.getAllTransactions
 );
+
+router.get('/representative/:id/account-statement',
+  authsession,
+  param('id').isUUID().withMessage('ID inválido'),
+  query('startDate').optional().isISO8601(),
+  query('endDate').optional().isISO8601(),
+  query('studentId').optional().isUUID(),
+  validateRoutes,
+  BalanceController.getAccountStatement
+);
+
+router.post('/transaction/move',
+  authsession,
+  body('transactionId').isUUID().withMessage('ID de transacción inválido'),
+  body('targetStudentId').isUUID().withMessage('ID de estudiante destino inválido'),
+  validateRoutes,
+  BalanceController.movePaymentBetweenStudents
+);
+
+router.post('/transaction/move',
+  authsession,
+  body('transactionId').isUUID().withMessage('ID de transacción inválido'),
+  body('targetStudentId').isUUID().withMessage('ID de estudiante destino inválido'),
+  validateRoutes,
+  BalanceController.movePaymentBetweenStudents
+);
+
+// ========== RANKING DE ESTUDIANTES ==========
+router.get('/students-ranking',
+  authsession,
+  query('type').optional().isIn(['debtors', 'creditors', 'all']),
+  query('search').optional().isString(),
+  query('representativeId').optional().isUUID(),
+  query('grade').optional().isString(),
+  query('section').optional().isString(),
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  query('sortOrder').optional().isIn(['asc', 'desc']),
+  validateRoutes,
+  BalanceController.getStudentsRanking
+);
+
 export default router;

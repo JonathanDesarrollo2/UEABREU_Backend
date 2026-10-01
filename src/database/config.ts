@@ -16,8 +16,12 @@ import BlockTimeConfig from "./models/blockTimeConfig";
 import Setting from "./models/settings";
 // ⭐ NUEVOS MODELOS ⭐
 import PlanillaCounter from "./models/PlanillaCounter";
-import RegistrationApplication from "./models/RegistrationAplicattion"; // Ajusta el nombre si es "RegistrationApplication"
+import RegistrationApplication from "./models/RegistrationAplicattion";
 import SchoolFee from "./models/ScoolFee";
+// 🔐 NUEVOS MODELOS PARA SEGURIDAD
+import AdminPassword from "./models/AdminPassword";
+import AuditLog from "./models/auditLog";
+import ExchangeRate from "./models/exchangeRate";
 
 dotenv.config();
 
@@ -57,11 +61,14 @@ if (NODE_ENV === 'production') {
       StudentSchedule,
       BlockTimeConfig,
       Setting,
-      PlanillaCounter,        
-      RegistrationApplication, 
-      SchoolFee
+      PlanillaCounter,
+      RegistrationApplication,
+      SchoolFee,
+      AdminPassword,   // ✅ NUEVO
+       AuditLog,
+       ExchangeRate
     ],
-    logging: console.log,
+    logging: false,
     pool: {
       max: 5,
       min: 0,
@@ -89,11 +96,14 @@ if (NODE_ENV === 'production') {
       StudentSchedule,
       BlockTimeConfig,
       Setting,
-      PlanillaCounter,        
-      RegistrationApplication, 
-      SchoolFee
+      PlanillaCounter,
+      RegistrationApplication,
+      SchoolFee,
+      AdminPassword,   // ✅ NUEVO
+       AuditLog,
+       ExchangeRate
     ],
-    logging: console.log,
+    logging: false,
     pool: {
       max: 5,
       min: 0,
@@ -115,6 +125,12 @@ export const connectToDatabase = async () => {
 
     console.log(colors.yellow.bold('🔄 Sincronizando modelos...'));
 
+    // El esquema evoluciona mediante migraciones versionadas. `sync` solo
+    // conserva la creación automática de modelos nuevos en despliegues que
+    // todavía no tienen tablas históricas, pero nunca altera columnas.
+    const { migrator } = await import('./migrator');
+    await migrator.up();
+
     if (NODE_ENV === 'production') {
       await sequelize.sync();
       console.log(colors.green.bold('✅ Tablas creadas/verificadas en Render.'));
@@ -133,9 +149,10 @@ export const connectToDatabase = async () => {
         console.log(colors.green.bold('✅ Usuario admin creado.'));
       }
     } else {
-      // ⚠️ IMPORTANTE: Para desarrollo, descomenta sync({ alter: true })
-      // await sequelize.sync({ alter: true });
-      console.log(colors.green.bold('✅ Modelos sincronizados (desarrollo).'));
+      // No se usa `alter`: los cambios de estructura los gobiernan las
+      // migraciones. sync solo crea tablas que todavía no existen en una
+      // instalación limpia.
+      await sequelize.sync();
     }
 
     console.log(colors.green.bold('🎉 Base de datos lista!'));

@@ -82,7 +82,7 @@ export default class Transaction extends Model {
   })
   declare amount?: number;
 
-  // NUEVO: Monto en USD histórico
+  // NUEVO: Monto equivalente en USD histórico
   @AllowNull(true)
   @Default(0.00)
   @Column({
@@ -94,7 +94,7 @@ export default class Transaction extends Model {
   })
   declare amountUSD?: number;
 
-  // NUEVO: Tasa BCV usada (Bs/USD)
+  // NUEVO: Tasa BCV usada en la transacción
   @AllowNull(true)
   @Column({
     type: DataType.DECIMAL(10, 4),
@@ -148,6 +148,10 @@ export default class Transaction extends Model {
   @AllowNull(true)
   @Column({ type: DataType.DATEONLY })
   declare transactionDate?: Date;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(5) })
+  declare paymentTime?: string;
 
   @AllowNull(true)
   @Column({ type: DataType.STRING(50) })

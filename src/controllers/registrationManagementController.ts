@@ -9,8 +9,30 @@ import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import { Op } from "sequelize";
 import { BillingService } from "../services/billingServices";
+import { getCurrentDate } from "../utility/dateHelper";
+import PlanillaCounter from "../database/models/PlanillaCounter";
 
 export class RegistrationManagementController {
+
+  static createForExistingRepresentative = async (req: Request, res: Response) => {
+    const transaction = await sequelize.transaction();
+    try {
+      const representative = await Representative.findOne({ where: { userId: req.tokenData?.id }, transaction });
+      if (!representative) { await transaction.rollback(); return res.status(404).json({ result: false, content: [], error: ['Representante no encontrado'] }); }
+      const { studentData } = req.body;
+      if (!studentData?.fullName || !studentData?.birthDate || !studentData?.identityCard) { await transaction.rollback(); return res.status(400).json({ result: false, content: [], error: ['Nombre, cédula y fecha de nacimiento son obligatorios'] }); }
+      const [counter] = await PlanillaCounter.findOrCreate({ where: {}, defaults: { currentNumber: 1 }, transaction });
+      const planillaNumber = counter.currentNumber;
+      await counter.update({ currentNumber: planillaNumber + 1 }, { transaction });
+      const application = await RegistrationApplication.create({ planillaNumber, userId: req.tokenData!.id, representativeId: representative.id, formSnapshot: { source: 'existing-representative', studentData } }, { transaction });
+      await transaction.commit();
+      return res.status(201).json({ result: true, content: { id: application.id, planillaNumber, message: 'Solicitud enviada correctamente' }, error: [] });
+    } catch (error: any) {
+      await transaction.rollback();
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation('createForExistingRepresentative'));
+      return res.status(500).json({ result: false, content: [], error: ['Error al crear la solicitud'] });
+    }
+  };
 
 static listApplications = async (req: Request, res: Response) => {
   try {
@@ -35,7 +57,7 @@ static listApplications = async (req: Request, res: Response) => {
 
     const { count, rows: applications } = await RegistrationApplication.findAndCountAll({
       where,
-      attributes: ["id", "planillaNumber", "createdAt", "userId", "representativeId"],
+      attributes: ["id", "planillaNumber", "createdAt", "userId", "representativeId", "formSnapshot"],
       include: [
         {
           model: UserLogin,
@@ -43,7 +65,15 @@ static listApplications = async (req: Request, res: Response) => {
         },
         {
           model: Representative,
-          attributes: ["fullName"],
+          attributes: ["id", "fullName"],
+          include: [
+            {
+              model: Student,
+              as: 'students',
+              attributes: ["id", "status"],
+              required: false,
+            },
+          ],
         },
       ],
       order: [["createdAt", sortOrder]],
@@ -52,14 +82,23 @@ static listApplications = async (req: Request, res: Response) => {
       distinct: true,
     });
 
-    const result = applications.map((app) => ({
-      id: app.id,
-      planillaNumber: app.planillaNumber,
-      email: app.user?.usermail,
-      representativeName: app.representative?.fullName,
-      userActive: app.user?.userstatus ?? false,
-      createdAt: app.createdAt,
-    }));
+    const result = applications.map((app) => {
+      const students = (app.representative as any)?.students || [];
+      // "Representante regular": ya tiene al menos un estudiante inscrito
+      // (status 'regular') en el colegio. No altera ningún flujo, solo informa.
+      const isRegularRepresentative = students.some((s: any) => s.status === 'regular');
+      return {
+        id: app.id,
+        planillaNumber: app.planillaNumber,
+        email: app.user?.usermail,
+        representativeName: app.representative?.fullName,
+        userActive: app.user?.userstatus ?? false,
+        createdAt: app.createdAt,
+        userId: app.userId,
+        isExistingRepresentative: (app.formSnapshot as any)?.source === 'existing-representative',
+        isRegularRepresentative,
+      };
+    });
 
     res.status(200).json({
       result: true,
@@ -117,29 +156,74 @@ static activateApplication = async (req: Request, res: Response) => {
       return;
     }
 
+    // Las solicitudes de un representante existente no crean la cuenta de
+    // usuario otra vez. El estudiante se crea únicamente al aprobar la
+    // solicitud desde administración.
+    const snapshot: any = application.formSnapshot;
+    if (snapshot?.source === 'existing-representative' && snapshot.studentData) {
+      const studentData = snapshot.studentData;
+      const { aspiredGrade: _aspiredGrade, ...studentFields } = studentData;
+      const duplicated = await Student.findOne({ where: { identityCard: studentData.identityCard }, transaction });
+      if (!duplicated) {
+        await Student.create({
+          ...studentFields,
+          birthDate: new Date(studentData.birthDate),
+          representativeId: application.representativeId,
+          userId: application.userId,
+          status: 'pendiente',
+          admissionDate: await getCurrentDate(),
+          initialSchoolYear: new Date().getFullYear().toString(),
+          currentGrade: studentData.currentGrade || _aspiredGrade || 'En asignar',
+          section: studentData.section || 'Pendiente',
+          hasAllergies: Boolean(studentData.hasAllergies),
+          hasDiseases: Boolean(studentData.hasDiseases),
+          balance: 0
+        }, { transaction });
+      }
+    }
+
     // Activar el usuario
     application.user.userstatus = true;
     await application.user.save({ transaction });
 
-    // Cambiar estado de todos los estudiantes del representante a 'regular'
+    // Solo los estudiantes con estado "pendiente" pasan a "regular" (no repitientes)
     await Student.update(
       { status: "regular" },
-      { where: { userId: application.userId }, transaction }
+      {
+        where: { userId: application.userId, status: 'pendiente' },
+        transaction,
+      }
     );
 
-    // ✅ Obtener tasa BCV UNA SOLA VEZ, fuera de transacciones internas
-    const bcvRate = await BillingService.getCurrentBCVRate();
+    // ✅ Asignar fecha de admisión = fecha actual/simulada al activar la cuenta
+    await Student.update(
+      { admissionDate: await getCurrentDate() },
+      {
+        where: {
+          userId: application.userId,
+          status: 'regular',
+          hasPaidInscription: false,
+        },
+        transaction,
+      }
+    );
 
-    // Aplicar cargos de inscripción usando la MISMA transacción
-    const students = await Student.findAll({ where: { userId: application.userId }, transaction });
+    // Obtener todos los estudiantes recién activados
+    const students = await Student.findAll({
+      where: {
+        userId: application.userId,
+        status: 'regular',
+        hasPaidInscription: false,
+      },
+      transaction,
+    });
+
+    // Aplicar cuotas según fecha de ingreso para cada estudiante
     for (const student of students) {
-      const isNewStudent = !student.hasPaidInscription;
-      await BillingService.applyInscriptionFeesWithTransaction(
+      await BillingService.applyFeesBasedOnAdmission(
         student.id!,
         application.representativeId!,
-        isNewStudent,
-        bcvRate,
-        transaction       // <--- pasamos la transacción externa
+        transaction
       );
     }
 
@@ -156,7 +240,6 @@ static activateApplication = async (req: Request, res: Response) => {
     res.status(500).json({ result: false, content: [], error: ["Error al activar la cuenta"] });
   }
 };
-
   // Eliminar completamente el registro
   // Reemplaza el método deleteApplication en RegistrationManagementController.ts
 static deleteApplication = async (req: Request, res: Response) => {
@@ -250,6 +333,8 @@ static async getApplicationData(req: Request, res: Response) {
       return;
     }
 
+    const snapshot: any = application.formSnapshot;
+    const snapshotStudent = snapshot?.source === 'existing-representative' ? snapshot.studentData : null;
     const data = {
       representativeFullName: rep.fullName,
       representativeIdentityCard: rep.identityCard,
@@ -259,7 +344,7 @@ static async getApplicationData(req: Request, res: Response) {
       parentName: rep.parentName,
       parentIdentityCard: rep.parentIdentityCard,
       parentPhone: rep.parentPhone,
-      students: (rep.students || []).map(st => ({
+      students: snapshotStudent ? [snapshotStudent] : (rep.students || []).map(st => ({
         fullName: st.fullName,
         identityCard: st.identityCard,
         birthDate: st.birthDate ? new Date(st.birthDate).toISOString().substring(0, 10) : '',
@@ -289,4 +374,122 @@ static async getApplicationData(req: Request, res: Response) {
     res.status(500).json({ result: false, content: [], error: ["Error al obtener datos de la solicitud"] });
   }
 }
+static updateApplication = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const { representativeData, studentsData, email, userlogin } = req.body;
+
+    const application = await RegistrationApplication.findByPk(id, {
+      include: [UserLogin, Representative],
+      transaction,
+    });
+
+    if (!application) {
+      await transaction.rollback();
+      res.status(404).json({ result: false, content: [], error: ['Solicitud no encontrada'] });
+      return;
+    }
+
+    // Actualizar datos del usuario si se proporcionan email o login
+    if (application.user) {
+      if (email) application.user.usermail = email.toLowerCase();
+      if (userlogin) application.user.userlogin = userlogin;
+      await application.user.save({ transaction });
+    }
+
+    // Actualizar datos del representante
+    if (application.representative && representativeData) {
+      await application.representative.update({
+        fullName: representativeData.fullName || application.representative.fullName,
+        identityCard: representativeData.identityCard || application.representative.identityCard,
+        address: representativeData.address || application.representative.address,
+        phone: representativeData.phone || application.representative.phone,
+        relationship: representativeData.relationship || application.representative.relationship,
+        parentName: representativeData.parentName || application.representative.parentName,
+        parentIdentityCard: representativeData.parentIdentityCard || application.representative.parentIdentityCard,
+        parentAddress: representativeData.parentAddress || application.representative.parentAddress,
+        parentPhone: representativeData.parentPhone || application.representative.parentPhone,
+      }, { transaction });
+    }
+
+    // Actualizar o crear estudiantes
+    if (studentsData && Array.isArray(studentsData)) {
+      const currentStudents = await Student.findAll({
+        where: { representativeId: application.representativeId },
+        transaction,
+      });
+      const currentIds = currentStudents.map(s => s.id!);
+      const updatedIds: string[] = [];
+
+      for (const studentData of studentsData) {
+        const typed = studentData as any;
+        if (typed.id && currentIds.includes(typed.id)) {
+          const existingStudent = await Student.findByPk(typed.id, { transaction });
+          if (existingStudent) {
+            await existingStudent.update({
+              fullName: typed.fullName || existingStudent.fullName,
+              identityCard: typed.identityCard || existingStudent.identityCard,
+              birthDate: typed.birthDate ? new Date(typed.birthDate) : existingStudent.birthDate,
+              nationality: typed.nationality || existingStudent.nationality,
+              birthCountry: typed.birthCountry || existingStudent.birthCountry,
+              state: typed.state || existingStudent.state,
+              zone: typed.zone || existingStudent.zone,
+              addressDescription: typed.addressDescription || existingStudent.addressDescription,
+              phone: typed.phone || existingStudent.phone,
+              emergencyContact: typed.emergencyContact || existingStudent.emergencyContact,
+              emergencyPhone: typed.emergencyPhone || existingStudent.emergencyPhone,
+              currentGrade: typed.currentGrade || existingStudent.currentGrade,
+              section: typed.section || existingStudent.section,
+              // No actualizar balance ni admissionDate aquí
+            }, { transaction });
+            updatedIds.push(typed.id);
+          }
+        } else if (!typed.id && typed.fullName && typed.identityCard) {
+          // Crear nuevo estudiante
+          const studentExists = await Student.findOne({
+            where: { identityCard: typed.identityCard },
+            transaction,
+          });
+          if (!studentExists) {
+            await Student.create({
+              fullName: typed.fullName,
+              identityCard: typed.identityCard,
+              birthDate: new Date(typed.birthDate),
+              nationality: typed.nationality,
+              birthCountry: typed.birthCountry,
+              state: typed.state,
+              zone: typed.zone,
+              addressDescription: typed.addressDescription,
+              phone: typed.phone || '',
+              emergencyContact: typed.emergencyContact,
+              emergencyPhone: typed.emergencyPhone,
+              hasAllergies: typed.hasAllergies || false,
+              allergiesDescription: typed.allergiesDescription || '',
+              hasDiseases: typed.hasDiseases || false,
+              diseasesDescription: typed.diseasesDescription || '',
+              previousSchool: typed.previousSchool || null,
+              municipality: typed.municipality || null,
+              representativeId: application.representativeId!,
+              userId: application.userId,
+              status: 'pendiente',
+              currentGrade: typed.currentGrade || 'En asignar',
+              section: typed.section || 'Pendiente',
+              initialSchoolYear: new Date().getFullYear().toString(),
+              balance: 0,
+            }, { transaction });
+          }
+        }
+      }
+    }
+
+    await transaction.commit();
+    res.json({ result: true, content: ['Solicitud actualizada correctamente'], error: [] });
+  } catch (error: any) {
+    await transaction.rollback();
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("updateApplication"));
+    res.status(500).json({ result: false, content: [], error: ['Error al actualizar solicitud'] });
+  }
+};
 }
+

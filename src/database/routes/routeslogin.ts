@@ -4,6 +4,8 @@ import { validateRoutes } from "../../middleware/validateRoutes";
 import { User } from "../../controllers/UserController"; // Ajusta la ruta según tu estructura
 import { loginLimiter } from "../../utility/loginLimiter";
 import { authsession } from "../../utility/authsession";
+import { AdminPasswordController } from "../../controllers/AdminPasswordController";
+import { AccountController } from "../../controllers/AccountController";
 
 const RouterUser = Router();
 
@@ -28,6 +30,8 @@ RouterUser.post('/adduser'
     ,body('nivel')
         .optional()
         .isInt({ min: 1 }).withMessage('El nivel debe ser un número entero mayor a 0')
+    ,body('phone').optional().isString().isLength({ min: 7, max: 20 })
+    ,body('identityCard').optional().isString().isLength({ min: 5, max: 20 })
     ,User.adduser
 );
 
@@ -92,6 +96,8 @@ RouterUser.post('/updatelogin',
     body('nivel')
         .optional()
         .isInt({ min: 1 }).withMessage('El nivel debe ser un número entero mayor a 0'),
+    body('phone').optional().isString().isLength({ min: 7, max: 20 }),
+    body('identityCard').optional().isString().isLength({ min: 5, max: 20 }),
     validateRoutes,
     User.updatelogin
 );
@@ -113,6 +119,10 @@ RouterUser.get('/onsession'
     , authsession
     , User.UserActive
 );
+
+RouterUser.get('/account', authsession, AccountController.getAccount);
+RouterUser.post('/account/password-code', authsession, AccountController.requestPasswordCode);
+RouterUser.post('/account/password', authsession, AccountController.resetPassword);
 
 // Estadísticas del sistema
 RouterUser.get('/statistics'
@@ -171,5 +181,42 @@ RouterUser.put('/students/:id/exoneration',
   body('exonerationPercent').isFloat({ min: 0, max: 100 }).withMessage('Porcentaje entre 0 y 100'),
   validateRoutes,
   User.updateExoneration
+);
+
+// ========== NUEVA RUTA: Actualizar sección del estudiante ==========
+RouterUser.put('/students/:id/section',
+  authsession,
+  param('id').isUUID().withMessage('ID de estudiante inválido'),
+  body('section')
+    .notEmpty().withMessage('La sección es requerida')
+    .isString().isLength({ min: 1, max: 10 }).withMessage('Sección inválida (máx. 10 caracteres)'),
+  validateRoutes,
+  User.updateSection   // ← este método debes haberlo añadido antes en UserController
+);
+
+RouterUser.post('/impersonate/:id',
+  authsession,
+  param('id').isUUID().withMessage('ID de usuario inválido'),
+  validateRoutes,
+  User.impersonate
+);
+
+RouterUser.post('/admin-password/set',
+  authsession,
+  body('password').isString().isLength({ min: 12 }).withMessage('La contraseña debe tener al menos 12 caracteres'),
+  validateRoutes,
+  AdminPasswordController.setPassword
+);
+
+RouterUser.get('/admin-password/status',
+  authsession,
+  AdminPasswordController.checkPasswordStatus
+);
+
+RouterUser.get('/:id',
+  authsession,
+  param('id').isUUID().withMessage('ID inválido'),
+  validateRoutes,
+  User.getUserById
 );
 export default RouterUser;

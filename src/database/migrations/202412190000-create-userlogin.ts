@@ -1,8 +1,15 @@
 // src/database/migrations/202412190000-create-userlogin.ts
 import { QueryInterface, DataTypes } from 'sequelize';
+import { Migration } from '../migrator';
 
-module.exports = {
-  async up(queryInterface: QueryInterface): Promise<void> {
+// Firma Umzug v3 (igual que 202503160000-move-balance-to-students): Umzug invoca
+// up({ name, path, context }) y el QueryInterface llega en `context`.
+// Idempotente: si la tabla ya existe (creada históricamente por sequelize.sync),
+// no intenta recrearla ni duplicar el índice.
+export const up: Migration = async ({ context: queryInterface }: { context: QueryInterface }) => {
+  const existing = await queryInterface.describeTable('userlogin').catch(() => null);
+
+  if (!existing) {
     await queryInterface.createTable('userlogin', {
       id: {
         type: DataTypes.UUID,
@@ -48,12 +55,18 @@ module.exports = {
         defaultValue: DataTypes.NOW
       }
     });
-
-    // Índice adicional para búsquedas rápidas
-    await queryInterface.addIndex('userlogin', ['usermail']);
-  },
-
-  async down(queryInterface: QueryInterface): Promise<void> {
-    await queryInterface.dropTable('userlogin');
   }
+
+  // Índice adicional para búsquedas rápidas (solo si no hay ya uno sobre usermail)
+  const indexes = (await queryInterface.showIndex('userlogin').catch(() => [])) as any[];
+  const hasUsermailIndex = indexes.some((ix: any) =>
+    (ix.fields || []).some((f: any) => f.attribute === 'usermail')
+  );
+  if (!hasUsermailIndex) {
+    await queryInterface.addIndex('userlogin', ['usermail']);
+  }
+};
+
+export const down: Migration = async ({ context: queryInterface }: { context: QueryInterface }) => {
+  await queryInterface.dropTable('userlogin');
 };

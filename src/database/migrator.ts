@@ -9,12 +9,14 @@ export const migrator = new Umzug({
   migrations: {
     glob: path.join(
       __dirname,
-      isProduction ? '../migrations/*.js' : './migrations/*.ts'
+      isProduction ? './migrations/*.js' : './migrations/*.ts'
     ),
   },
   context: db.getQueryInterface(),
   storage: new SequelizeStorage({ sequelize: db }),
-  logger: console,
+  // Las migraciones se ejecutan de forma explícita al arrancar; no se
+  // imprimen consultas ni detalles de implementación en producción.
+  logger: undefined,
 });
 
 export type Migration = typeof migrator._types.migration;

@@ -33,4 +33,30 @@ PublicRouter.post('/verify-email',
 PublicRouter.get('/registration-status', PublicController.getRegistrationStatus);
 // En tu archivo de rutas públicas (ej: publicRouter.ts)
 PublicRouter.get('/next-planilla-number', PublicController.getNextPlanillaNumber);
+
+// ── Recuperación de contraseña ──────────────────────────────────────
+PublicRouter.post(
+  '/forgot-password',
+  body('email').isEmail().withMessage('Email válido requerido'),
+  validateRoutes,
+  PublicController.forgotPassword
+);
+
+PublicRouter.post(
+  '/verify-reset-code',
+  body('email').isEmail().withMessage('Email válido requerido'),
+  body('code').isLength({ min: 6, max: 6 }).withMessage('Código de 6 dígitos requerido'),
+  validateRoutes,
+  PublicController.verifyResetCode
+);
+
+PublicRouter.post(
+  '/reset-password',
+  body('email').isEmail().withMessage('Email válido requerido'),
+  body('code').isLength({ min: 6, max: 6 }).withMessage('Código de 6 dígitos requerido'),
+  body('newPassword').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres'),
+  body('confirmPassword').isLength({ min: 6 }).withMessage('La confirmación es requerida'),
+  validateRoutes,
+  PublicController.resetPassword
+);
 export default PublicRouter;

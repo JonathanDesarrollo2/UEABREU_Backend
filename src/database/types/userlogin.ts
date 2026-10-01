@@ -10,8 +10,15 @@ export interface typeuserlogin_full {
     userpass?: string;
     userstatus?: boolean;
     nivel?: number;
+    phone?: string;
+    identityCard?: string;
     createdAt?: Date;
     updatedAt?: Date;
+        // Campos de recuperación de contraseña
+    passwordResetCode?: string | null;
+    passwordResetCodeExpires?: Date | null;
+    passwordResetRequestCount?: number | null;
+    passwordResetWindowStart?: Date | null;
     
     // Nuevos campos para registro de representantes
     representativeData?: {
