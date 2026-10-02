@@ -335,7 +335,11 @@ export class BankAPI {
       const now = new Date();
       const pad = (n: number) => n.toString().padStart(2, '0');
       const formattedDate = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-
+            // ✅ AUTENTICAR ANTES DE CUALQUIER VALIDACIÓN
+      // Sin esto, sendRequest falla inmediatamente con "No hay clave de encriptación disponible"
+      if (!this.workingKey) {
+        await this.authenticate();
+      }
       const childClientID = validationData.ChildClientID && validationData.ChildClientID.trim() !== ''
         ? validationData.ChildClientID
         : undefined;
@@ -369,6 +373,7 @@ export class BankAPI {
           return result;
         }
       } catch (error: any) {
+        console.error(`🚨 [BNC] P2P falló:`, error.message);   // ← AGREGAR
         result.details.validateP2P = {
           executed: true,
           success: false,
@@ -401,6 +406,7 @@ export class BankAPI {
           return result;
         }
       } catch (error: any) {
+        console.error(`🚨 [BNC] Reference falló:`, error.message);   // ← AGREGAR
         result.details.validateReference = {
           executed: true,
           success: false,
@@ -434,6 +440,7 @@ export class BankAPI {
           return result;
         }
       } catch (error: any) {
+        console.error(`🚨 [BNC] Existence falló:`, error.message);   // ← AGREGAR
         result.details.validateExistence = {
           executed: true,
           success: false,
