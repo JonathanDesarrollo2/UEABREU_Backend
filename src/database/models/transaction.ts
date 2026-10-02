@@ -177,7 +177,7 @@ export default class Transaction extends Model {
   })
   declare balanceAfter?: number;
 
-  // Métodos de ayuda
+  // Métodos de ayuda (sin cambios)
   isSuccessful(): boolean {
     return this.status === TransactionStatus.COMPLETED;
   }

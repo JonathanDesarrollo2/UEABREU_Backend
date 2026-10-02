@@ -11,6 +11,7 @@ import {
   ValidationResponse,
   CascadedValidationResult,
   BCVRateResponse,
+  BankInfo,
 } from './Types';
 
 /**
@@ -21,20 +22,14 @@ class BankCrypto {
     0x49, 0x76, 0x61, 0x6e, 0x20, 0x4d, 0x65, 0x64, 0x76, 0x65, 0x64, 0x65, 0x76,
   ]); // "Ivan Medvedev" en bytes
 
-  /**
-   * Deriva clave y IV usando PBKDF2 con el salt fijo
-   */
   static deriveKeyAndIV(encryptionKey: string): { key: Buffer; iv: Buffer } {
     const derived = crypto.pbkdf2Sync(encryptionKey, this.SALT, 1000, 48, 'sha1');
     return {
-      key: derived.subarray(0, 32), // primeros 32 bytes para AES-256
-      iv: derived.subarray(32, 48), // siguientes 16 bytes para IV
+      key: derived.subarray(0, 32),
+      iv: derived.subarray(32, 48),
     };
   }
 
-  /**
-   * Encripta texto plano con AES-256-CBC
-   */
   static encryptAES(plainText: string, key: Buffer, iv: Buffer): string {
     const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
     let encrypted = cipher.update(plainText, 'utf8', 'base64');
@@ -42,9 +37,6 @@ class BankCrypto {
     return encrypted;
   }
 
-  /**
-   * Desencripta texto en base64 con AES-256-CBC
-   */
   static decryptAES(encryptedBase64: string, key: Buffer, iv: Buffer): string {
     const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
     let decrypted = decipher.update(encryptedBase64, 'base64', 'utf8');
@@ -52,9 +44,6 @@ class BankCrypto {
     return decrypted;
   }
 
-  /**
-   * Calcula hash SHA256 de un string y devuelve en hexadecimal
-   */
   static encryptSHA256(text: string): string {
     return crypto.createHash('sha256').update(text).digest('hex');
   }
@@ -73,9 +62,6 @@ export class BankAPI {
     this.masterKey = process.env.BNC_MASTER_KEY || '';
   }
 
-  /**
-   * Genera una referencia única por día (para evitar duplicados)
-   */
   private generateReference(): string {
     const now = new Date();
     const dateStr = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
@@ -83,38 +69,25 @@ export class BankAPI {
     return `REF-${dateStr}-${this.referenceCounter.toString().padStart(4, '0')}`;
   }
 
-  /**
-   * Construye y envía una petición al banco, manejando encriptación y desencriptación
-   */
   private async sendRequest<T>(
     endpoint: string,
     payload: object,
     useMasterKey: boolean = false
   ): Promise<T> {
-    // Si estamos en modo prueba, devolver respuestas simuladas
     if (process.env.BNC_TEST_MODE === 'true') {
       return this.getMockResponse<T>(endpoint, payload);
     }
 
-    // Determinar clave a usar
     const encryptionKey = useMasterKey ? this.masterKey : this.workingKey;
     if (!encryptionKey) {
       throw new Error('No hay clave de encriptación disponible');
     }
 
-    // Derivar clave e IV
     const { key, iv } = BankCrypto.deriveKeyAndIV(encryptionKey);
-
-    // Serializar payload a JSON
     const payloadJson = JSON.stringify(payload);
-
-    // Encriptar payload para Value
     const valueEncrypted = BankCrypto.encryptAES(payloadJson, key, iv);
-
-    // Calcular hash SHA256 para Validation
     const validationHash = BankCrypto.encryptSHA256(payloadJson);
 
-    // Construir request completo
     const requestBody = {
       ClientGUID: this.clientGUID,
       Reference: this.generateReference(),
@@ -123,7 +96,6 @@ export class BankAPI {
       swTestOperation: false,
     };
 
-    // Enviar petición
     const response = await fetch(`${this.baseURL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -137,17 +109,13 @@ export class BankAPI {
     const bankResponse = (await response.json()) as BankApiResponse;
 
     if (bankResponse.status !== 'OK') {
-      // Verificar si el mensaje contiene RWK (refresh working key)
       if (bankResponse.message.includes('RWK')) {
-        // Refrescar working key
         await this.authenticate();
-        // Reintentar la petición recursivamente (solo una vez para evitar bucles)
         return this.sendRequest<T>(endpoint, payload, useMasterKey);
       }
       throw new Error(bankResponse.message || 'Error en respuesta del banco');
     }
 
-    // Desencriptar el value
     try {
       const decryptedValue = BankCrypto.decryptAES(bankResponse.value!, key, iv);
       return JSON.parse(decryptedValue) as T;
@@ -156,9 +124,6 @@ export class BankAPI {
     }
   }
 
-  /**
-   * Respuestas simuladas para modo prueba
-   */
   private getMockResponse<T>(endpoint: string, payload: any): T {
     // LogOn
     if (endpoint === '/Auth/LogOn') {
@@ -177,8 +142,13 @@ export class BankAPI {
       } as T;
     }
 
+    // Lista de Bancos
+    if (endpoint === '/Services/Banks') {
+      return this.getMockBanksList() as T;
+    }
+
     // Validaciones
-    const movementExists = Math.random() > 0.3; // 70% éxito
+    const movementExists = Math.random() > 0.3;
     return {
       MovementExists: movementExists,
       Date: movementExists ? new Date().toISOString().split('T')[0] : '',
@@ -200,7 +170,20 @@ export class BankAPI {
     } as T;
   }
 
-  // Autenticación (LogOn)
+  private getMockBanksList(): BankInfo[] {
+    return [
+      { Name: "Banco Nacional de Crédito, C.A. Banco Universal", Code: "0191", Services: "TRF, P2P" },
+      { Name: "Banco de Venezuela", Code: "0102", Services: "TRF, P2P" },
+      { Name: "Banco Mercantil, C.A.", Code: "0105", Services: "TRF, P2P" },
+      { Name: "BBVA Provincial", Code: "0108", Services: "TRF, P2P" },
+      { Name: "Bancaribe", Code: "0114", Services: "TRF, P2P" },
+      { Name: "Banco Exterior", Code: "0115", Services: "TRF, P2P" },
+      { Name: "Banesco Banco Universal", Code: "0134", Services: "TRF, P2P" },
+      { Name: "Banco del Tesoro", Code: "0163", Services: "TRF, P2P" },
+      { Name: "Banco Bicentenario", Code: "0175", Services: "TRF, P2P" },
+    ];
+  }
+
   async authenticate(): Promise<string> {
     try {
       if (!this.masterKey) {
@@ -211,13 +194,12 @@ export class BankAPI {
       const response = await this.sendRequest<BankLogOnResponse>(
         '/Auth/LogOn',
         payload,
-        true // usar MasterKey
+        true
       );
 
       this.workingKey = response.WorkingKey;
       return this.workingKey;
     } catch (error: any) {
-      // En modo prueba, si falla, usar mock
       if (process.env.BNC_TEST_MODE === 'true') {
         this.workingKey = 'test-fallback-key-' + Date.now();
         return this.workingKey;
@@ -226,21 +208,31 @@ export class BankAPI {
     }
   }
 
-  // Obtener tasa BCV
   async getBCVRate(): Promise<BCVRateResponse> {
     try {
       if (!this.workingKey) await this.authenticate();
       return await this.sendRequest<BCVRateResponse>('/Services/BCVRates', {});
     } catch (error: any) {
       if (process.env.BNC_TEST_MODE === 'true') {
-        // fallback a mock
         return this.getMockResponse('/Services/BCVRates', {});
       }
       throw new Error(`Error obteniendo tasa BCV: ${error.message}`);
     }
   }
 
-  // Validación P2P
+  // Obtener lista de bancos disponibles
+  async getBanksList(): Promise<BankInfo[]> {
+    try {
+      if (!this.workingKey) await this.authenticate();
+      return await this.sendRequest<BankInfo[]>('/Services/Banks', {});
+    } catch (error: any) {
+      if (process.env.BNC_TEST_MODE === 'true') {
+        return this.getMockBanksList();
+      }
+      throw new Error(`Error obteniendo lista de bancos: ${error.message}`);
+    }
+  }
+
   async validateP2P(data: ValidateP2PRequest): Promise<ValidationResponse> {
     try {
       if (!this.workingKey) await this.authenticate();
@@ -253,7 +245,6 @@ export class BankAPI {
     }
   }
 
-  // Validación con Referencia
   async validateReference(data: ValidateReferenceRequest): Promise<ValidationResponse> {
     try {
       if (!this.workingKey) await this.authenticate();
@@ -266,7 +257,6 @@ export class BankAPI {
     }
   }
 
-  // Validación de Existencia
   async validateExistence(data: ValidateExistenceRequest): Promise<ValidationResponse> {
     try {
       if (!this.workingKey) await this.authenticate();
@@ -279,157 +269,150 @@ export class BankAPI {
     }
   }
 
-  // Validación en cascada
   async cascadedValidation(validationData: any): Promise<CascadedValidationResult> {
-  const result: CascadedValidationResult = {
-    overallResult: 'error',
-    message: '',
-    details: {
-      validateP2P: { executed: false, success: false, movementExists: false },
-      validateReference: { executed: false, success: false, movementExists: false },
-      validateExistence: { executed: false, success: false, movementExists: false },
-    },
-    timestamp: new Date().toISOString(),
-  };
+    const result: CascadedValidationResult = {
+      overallResult: 'error',
+      message: '',
+      details: {
+        validateP2P: { executed: false, success: false, movementExists: false },
+        validateReference: { executed: false, success: false, movementExists: false },
+        validateExistence: { executed: false, success: false, movementExists: false },
+      },
+      timestamp: new Date().toISOString(),
+    };
 
-  try {
-    // Formato exacto que espera el banco: yyyy/MM/ddTHH:mm:ss
-    const now = new Date();
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const formattedDate = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-
-    // Limpiar ChildClientID y BranchID: si vienen vacíos o undefined, se omiten
-    const childClientID = validationData.ChildClientID && validationData.ChildClientID.trim() !== ''
-      ? validationData.ChildClientID
-      : undefined;
-    const branchID = validationData.BranchID && validationData.BranchID.trim() !== ''
-      ? validationData.BranchID
-      : undefined;
-
-    // 1. Validación P2P
     try {
-      const p2pPayload: any = {
-        AccountNumber: validationData.AccountNumber,
-        BankCode: validationData.BankCode,
-        PhoneNumber: validationData.PhoneNumber,
-        ClientID: validationData.ClientID,
-        Reference: String(validationData.Reference),
-        RequestDate: formattedDate,
-        Amount: Number(validationData.Amount),
-      };
-      if (childClientID) p2pPayload.ChildClientID = childClientID;
-      if (branchID) p2pPayload.BranchID = branchID;
+      const now = new Date();
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const formattedDate = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
-      const p2pResult = await this.sendRequest<ValidationResponse>('/Position/ValidateP2P', p2pPayload);
-      result.details.validateP2P = {
-        executed: true,
-        success: true,
-        movementExists: p2pResult.MovementExists,
-        data: p2pResult,
-      };
-      if (p2pResult.MovementExists) {
-        result.overallResult = 'success';
-        result.message = 'Pago verificado exitosamente mediante validación P2P';
-        return result;
+      const childClientID = validationData.ChildClientID && validationData.ChildClientID.trim() !== ''
+        ? validationData.ChildClientID
+        : undefined;
+      const branchID = validationData.BranchID && validationData.BranchID.trim() !== ''
+        ? validationData.BranchID
+        : undefined;
+
+      try {
+        const p2pPayload: any = {
+          AccountNumber: validationData.AccountNumber,
+          BankCode: validationData.BankCode,
+          PhoneNumber: validationData.PhoneNumber,
+          ClientID: validationData.ClientID,
+          Reference: String(validationData.Reference),
+          RequestDate: formattedDate,
+          Amount: Number(validationData.Amount),
+        };
+        if (childClientID) p2pPayload.ChildClientID = childClientID;
+        if (branchID) p2pPayload.BranchID = branchID;
+
+        const p2pResult = await this.sendRequest<ValidationResponse>('/Position/ValidateP2P', p2pPayload);
+        result.details.validateP2P = {
+          executed: true,
+          success: true,
+          movementExists: p2pResult.MovementExists,
+          data: p2pResult,
+        };
+        if (p2pResult.MovementExists) {
+          result.overallResult = 'success';
+          result.message = 'Pago verificado exitosamente mediante validación P2P';
+          return result;
+        }
+      } catch (error: any) {
+        result.details.validateP2P = {
+          executed: true,
+          success: false,
+          movementExists: false,
+          error: error.message,
+        };
       }
-    } catch (error: any) {
-      result.details.validateP2P = {
-        executed: true,
-        success: false,
-        movementExists: false,
-        error: error.message,
-      };
-    }
 
-    // 2. Validación con Referencia
-    try {
-      const refPayload: any = {
-        ClientID: validationData.ClientID,
-        AccountNumber: validationData.AccountNumber,
-        Reference: String(validationData.Reference),
-        Amount: Number(validationData.Amount),
-        DateMovement: formattedDate,
-      };
-      if (childClientID) refPayload.ChildClientID = childClientID;
-      if (branchID) refPayload.BranchID = branchID;
+      try {
+        const refPayload: any = {
+          ClientID: validationData.ClientID,
+          AccountNumber: validationData.AccountNumber,
+          Reference: String(validationData.Reference),
+          Amount: Number(validationData.Amount),
+          DateMovement: formattedDate,
+        };
+        if (childClientID) refPayload.ChildClientID = childClientID;
+        if (branchID) refPayload.BranchID = branchID;
 
-      const refResult = await this.sendRequest<ValidationResponse>('/Position/Validate', refPayload);
-      result.details.validateReference = {
-        executed: true,
-        success: true,
-        movementExists: refResult.MovementExists,
-        data: refResult,
-      };
-      if (refResult.MovementExists) {
-        result.overallResult = 'success';
-        result.message = 'Pago verificado exitosamente mediante validación con referencia';
-        return result;
+        const refResult = await this.sendRequest<ValidationResponse>('/Position/Validate', refPayload);
+        result.details.validateReference = {
+          executed: true,
+          success: true,
+          movementExists: refResult.MovementExists,
+          data: refResult,
+        };
+        if (refResult.MovementExists) {
+          result.overallResult = 'success';
+          result.message = 'Pago verificado exitosamente mediante validación con referencia';
+          return result;
+        }
+      } catch (error: any) {
+        result.details.validateReference = {
+          executed: true,
+          success: false,
+          movementExists: false,
+          error: error.message,
+        };
       }
-    } catch (error: any) {
-      result.details.validateReference = {
-        executed: true,
-        success: false,
-        movementExists: false,
-        error: error.message,
-      };
-    }
 
-    // 3. Validación de Existencia (sin referencia)
-    try {
-      const existencePayload: any = {
-        AccountNumber: validationData.AccountNumber,
-        BankCode: validationData.BankCode,
-        PhoneNumber: validationData.PhoneNumber,
-        ClientID: validationData.ClientID,
-        RequestDate: formattedDate,
-        Amount: Number(validationData.Amount),
-      };
-      if (childClientID) existencePayload.ChildClientID = childClientID;
-      if (branchID) existencePayload.BranchID = branchID;
+      try {
+        const existencePayload: any = {
+          AccountNumber: validationData.AccountNumber,
+          BankCode: validationData.BankCode,
+          PhoneNumber: validationData.PhoneNumber,
+          ClientID: validationData.ClientID,
+          RequestDate: formattedDate,
+          Amount: Number(validationData.Amount),
+        };
+        if (childClientID) existencePayload.ChildClientID = childClientID;
+        if (branchID) existencePayload.BranchID = branchID;
 
-      const existenceResult = await this.sendRequest<ValidationResponse>('/Position/ValidateExistence', existencePayload);
-      result.details.validateExistence = {
-        executed: true,
-        success: true,
-        movementExists: existenceResult.MovementExists,
-        data: existenceResult,
-      };
-      if (existenceResult.MovementExists) {
-        result.overallResult = 'success';
-        result.message = 'Pago verificado exitosamente mediante validación de existencia';
-        return result;
+        const existenceResult = await this.sendRequest<ValidationResponse>('/Position/ValidateExistence', existencePayload);
+        result.details.validateExistence = {
+          executed: true,
+          success: true,
+          movementExists: existenceResult.MovementExists,
+          data: existenceResult,
+        };
+        if (existenceResult.MovementExists) {
+          result.overallResult = 'success';
+          result.message = 'Pago verificado exitosamente mediante validación de existencia';
+          return result;
+        }
+      } catch (error: any) {
+        result.details.validateExistence = {
+          executed: true,
+          success: false,
+          movementExists: false,
+          error: error.message,
+        };
       }
+
+      const anyMovementFound =
+        result.details.validateP2P.movementExists ||
+        result.details.validateReference.movementExists ||
+        result.details.validateExistence.movementExists;
+
+      if (anyMovementFound) {
+        result.overallResult = 'success';
+        result.message = 'Pago verificado exitosamente';
+      } else {
+        result.overallResult = 'manual_review';
+        result.message = 'No se encontró el movimiento en ninguna validación. Se requiere revisión manual.';
+      }
+
+      return result;
     } catch (error: any) {
-      result.details.validateExistence = {
-        executed: true,
-        success: false,
-        movementExists: false,
-        error: error.message,
-      };
+      result.overallResult = 'error';
+      result.message = `Error crítico: ${error.message}`;
+      return result;
     }
-
-    const anyMovementFound =
-      result.details.validateP2P.movementExists ||
-      result.details.validateReference.movementExists ||
-      result.details.validateExistence.movementExists;
-
-    if (anyMovementFound) {
-      result.overallResult = 'success';
-      result.message = 'Pago verificado exitosamente';
-    } else {
-      result.overallResult = 'manual_review';
-      result.message = 'No se encontró el movimiento en ninguna validación. Se requiere revisión manual.';
-    }
-
-    return result;
-  } catch (error: any) {
-    result.overallResult = 'error';
-    result.message = `Error crítico: ${error.message}`;
-    return result;
   }
-}
 
-  // Endpoints de utilidad (sin encriptación, solo para pruebas)
   async getWelcome(): Promise<BankWelcomeResponse> {
     try {
       const response = await fetch(`${this.baseURL}/welcome/home`);

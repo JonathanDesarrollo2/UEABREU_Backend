@@ -73,6 +73,9 @@ router.post('/validate-existence',
 // NUEVA RUTA: Tasa BCV del día
 router.get('/bcv-rate', bankController.getBCVRate);
 
+// NUEVA RUTA: Lista de bancos disponibles
+router.get('/banks', bankController.getBanksList);
+
 // Ruta para obtener información completa del estado del banco
 router.get('/full-status', bankController.getBankFullStatus);
 

@@ -213,7 +213,7 @@ router.get('/students-ranking',
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
   query('sortOrder').optional().isIn(['asc', 'desc']),
   validateRoutes,
-  BalanceController.getStudentsRanking
+  BalanceController.getStudentsRanking 
 );
 
 export default router;

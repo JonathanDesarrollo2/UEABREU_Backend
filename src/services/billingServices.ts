@@ -14,7 +14,42 @@ import ExchangeRate from "../database/models/exchangeRate";
 export class BillingService {
 
   public static async getCurrentBCVRate(): Promise<number> {
-    return this.getRateForDate(await this.getCaracasDate());
+    const today = await this.getCaracasDate();
+
+    // 1) Buscar tasa de HOY en la BD
+    const stored = await ExchangeRate.findOne({ where: { effectiveDate: today } });
+    if (stored?.rate && Number(stored.rate) > 0) {
+      return Number(stored.rate);
+    }
+
+    // 2) No existe → consultar al banco y guardar
+    try {
+      const bankAPI = new BankAPI();
+      const bcvRate = await bankAPI.getBCVRate();
+
+      if (!bcvRate.PriceRateBCV || bcvRate.PriceRateBCV <= 0) {
+        throw new Error('El banco devolvió una tasa inválida');
+      }
+
+      const [record] = await ExchangeRate.findOrCreate({
+        where: { effectiveDate: today },
+        defaults: {
+          effectiveDate: today,
+          rate: bcvRate.PriceRateBCV,
+          fetchedAt: new Date(),
+          source: 'BNC-autofetch',
+        },
+      });
+
+      console.log(`📈 Tasa BCV auto-guardada para ${today}: ${record.rate} Bs/USD`);
+      return Number(record.rate);
+    } catch (error: any) {
+      console.error('⚠️ Error al auto-consultar tasa BCV:', error.message);
+    }
+
+    throw new Error(
+      `No existe una tasa registrada para la fecha ${today} y no se pudo consultar al banco`
+    );
   }
 
   private static async getCaracasDate(): Promise<string> {

@@ -119,6 +119,7 @@ export interface CascadedValidationResult {
   };
   timestamp: string;
 }
+
 // Tipos para Tasa BCV
 export interface BCVRateRequest {
   // Objeto vacío según la documentación
@@ -127,4 +128,11 @@ export interface BCVRateRequest {
 export interface BCVRateResponse {
   PriceRateBCV: number;
   dtRate: string; // Formato: "dd/MM/yyyy"
+}
+
+// Tipos para Lista de Bancos
+export interface BankInfo {
+  Name: string;
+  Code: string;
+  Services: string;
 }
