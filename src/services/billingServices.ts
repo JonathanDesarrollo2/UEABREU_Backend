@@ -58,13 +58,41 @@ export class BillingService {
     return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Caracas' });
   }
 
-  /** Obtiene exclusivamente la tasa guardada para la fecha valor solicitada. */
+  /** Obtiene la tasa guardada para la fecha valor. Si no existe y es HOY, la consulta al banco y la guarda. */
   public static async getRateForDate(date: string): Promise<number> {
+    // 1) Buscar en la BD
     const stored = await ExchangeRate.findOne({ where: { effectiveDate: date } });
-    if (!stored?.rate || Number(stored.rate) <= 0) {
-      throw new Error(`No existe una tasa registrada para la fecha ${date}`);
+    if (stored?.rate && Number(stored.rate) > 0) {
+      return Number(stored.rate);
     }
-    return Number(stored.rate);
+
+    // 2) Si no existe Y la fecha es HOY → auto-consultar al banco y guardar
+    const today = await this.getCaracasDate();
+    if (date === today) {
+      try {
+        const bankAPI = new BankAPI();
+        const bcvRate = await bankAPI.getBCVRate();
+
+        if (bcvRate.PriceRateBCV && bcvRate.PriceRateBCV > 0) {
+          const [record] = await ExchangeRate.findOrCreate({
+            where: { effectiveDate: date },
+            defaults: {
+              effectiveDate: date,
+              rate: bcvRate.PriceRateBCV,
+              fetchedAt: new Date(),
+              source: 'BNC-autofetch',
+            },
+          });
+
+          console.log(`📈 Tasa auto-guardada para ${date}: ${record.rate} Bs/USD`);
+          return Number(record.rate);
+        }
+      } catch (err: any) {
+        console.error(`⚠️ Error al auto-consultar tasa para ${date}:`, err.message);
+      }
+    }
+
+    throw new Error(`No existe una tasa registrada para la fecha ${date}`);
   }
 
   /**
