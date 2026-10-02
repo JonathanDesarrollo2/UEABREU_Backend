@@ -55,17 +55,19 @@ static listApplications = async (req: Request, res: Response) => {
       where[Op.or] = orConditions;
     }
 
-    const { count, rows: applications } = await RegistrationApplication.findAndCountAll({
+        const { count, rows: applications } = await RegistrationApplication.findAndCountAll({
       where,
       attributes: ["id", "planillaNumber", "createdAt", "userId", "representativeId", "formSnapshot"],
       include: [
         {
           model: UserLogin,
           attributes: ["usermail", "userstatus"],
+          required: false,
         },
         {
           model: Representative,
           attributes: ["id", "fullName"],
+          required: false,
           include: [
             {
               model: Student,
@@ -80,6 +82,7 @@ static listApplications = async (req: Request, res: Response) => {
       limit,
       offset,
       distinct: true,
+      subQuery: false,
     });
 
     const result = applications.map((app) => {
