@@ -96,14 +96,36 @@ export class BankAPI {
       swTestOperation: false,
     };
 
-    const response = await fetch(`${this.baseURL}${endpoint}`, {
+        const response = await fetch(`${this.baseURL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      let errorBody = '';
+      try {
+        errorBody = await response.text();
+      } catch {
+        errorBody = '(sin body)';
+      }
+
+      console.error(`🚨 [BNC] HTTP ${response.status} en ${endpoint}`);
+      console.error(`🚨 [BNC] Body: ${errorBody}`);
+      console.error(`🚨 [BNC] Payload enviado:`, JSON.stringify({
+        ClientGUID: requestBody.ClientGUID,
+        Reference: requestBody.Reference,
+        // NO loguear Value ni Validation completos por seguridad, solo su longitud
+        valueLength: requestBody.Value?.length,
+        validationLength: requestBody.Validation?.length,
+      }));
+
+      // 409 en LogOn → hay sesión previa abierta
+      if (response.status === 409 && endpoint === '/Auth/LogOn') {
+        this.workingKey = null;
+      }
+
+      throw new Error(`HTTP error! status: ${response.status}${errorBody ? ` - ${errorBody}` : ''}`);
     }
 
     const bankResponse = (await response.json()) as BankApiResponse;
