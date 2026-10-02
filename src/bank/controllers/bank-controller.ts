@@ -174,8 +174,37 @@ export class BankController {
   };
 
   /**
+   * Obtener lista de bancos disponibles del BNC
+   */
+  getBanksList = async (req: Request, res: Response): Promise<void> => {
+    try {
+      console.log('🏦 Solicitando lista de bancos disponibles...');
+
+      const banks = await this.bankAPI.getBanksList();
+
+      const response: ProxyResponse<typeof banks> = {
+        result: true,
+        content: banks,
+        error: []
+      };
+
+      console.log(`✅ ${banks.length} bancos obtenidos`);
+      res.json(response);
+
+    } catch (error: any) {
+      console.error('❌ Error obteniendo lista de bancos:', error);
+
+      const response: ProxyResponse = {
+        result: false,
+        content: null,
+        error: [error.message]
+      };
+      res.status(500).json(response);
+    }
+  };
+
+  /**
    * Validación en cascada - Método principal
-   * Ejecuta las 3 validaciones secuencialmente hasta encontrar el movimiento
    */
   cascadedValidation = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -196,7 +225,6 @@ export class BankController {
         error: []
       };
 
-      // Log del resultado final
       console.log(`📊 Resultado final de validación: ${validationResult.overallResult}`);
       console.log(`💬 Mensaje: ${validationResult.message}`);
 
@@ -329,12 +357,11 @@ export class BankController {
     try {
       console.log('📊 Solicitando estado completo del banco...');
       
-      // Obtener múltiples datos en paralelo
       const [welcomeData, healthData, workingKey, bcvRate] = await Promise.allSettled([
         this.bankAPI.getWelcome(),
         this.bankAPI.testConnection(),
-        this.bankAPI.authenticate().catch(() => null), // No fallar si la autenticación falla
-        this.bankAPI.getBCVRate().catch(() => null)    // No fallar si BCV falla
+        this.bankAPI.authenticate().catch(() => null),
+        this.bankAPI.getBCVRate().catch(() => null)
       ]);
 
       const fullStatus = {
