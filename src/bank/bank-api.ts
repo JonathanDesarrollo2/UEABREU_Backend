@@ -96,7 +96,7 @@ export class BankAPI {
       swTestOperation: false,
     };
 
-        const response = await fetch(`${this.baseURL}${endpoint}`, {
+    const response = await fetch(`${this.baseURL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
@@ -115,12 +115,12 @@ export class BankAPI {
       console.error(`🚨 [BNC] Payload enviado:`, JSON.stringify({
         ClientGUID: requestBody.ClientGUID,
         Reference: requestBody.Reference,
-        // NO loguear Value ni Validation completos por seguridad, solo su longitud
         valueLength: requestBody.Value?.length,
         validationLength: requestBody.Validation?.length,
       }));
 
-      // 409 en LogOn → hay sesión previa abierta
+      // 409 en LogOn → hay sesión previa abierta. Limpiamos el workingKey
+      // local para forzar una nueva autenticación en el siguiente intento.
       if (response.status === 409 && endpoint === '/Auth/LogOn') {
         this.workingKey = null;
       }
@@ -206,28 +206,56 @@ export class BankAPI {
     ];
   }
 
+  /**
+   * Autenticación con el banco. Reintenta hasta 3 veces si el banco
+   * responde 409 (sesión previa colgada). Con delay progresivo entre intentos.
+   */
   async authenticate(): Promise<string> {
-    try {
-      if (!this.masterKey) {
-        throw new Error('MasterKey no configurada');
-      }
+    const maxAttempts = 3;
+    let lastError: any = null;
 
-      const payload = { ClientGUID: this.clientGUID };
-      const response = await this.sendRequest<BankLogOnResponse>(
-        '/Auth/LogOn',
-        payload,
-        true
-      );
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (!this.masterKey) {
+          throw new Error('MasterKey no configurada');
+        }
 
-      this.workingKey = response.WorkingKey;
-      return this.workingKey;
-    } catch (error: any) {
-      if (process.env.BNC_TEST_MODE === 'true') {
-        this.workingKey = 'test-fallback-key-' + Date.now();
+        const payload = { ClientGUID: this.clientGUID };
+        const response = await this.sendRequest<BankLogOnResponse>(
+          '/Auth/LogOn',
+          payload,
+          true
+        );
+
+        this.workingKey = response.WorkingKey;
+        console.log(`✅ [BNC] LogOn exitoso (intento ${attempt})`);
         return this.workingKey;
+      } catch (error: any) {
+        lastError = error;
+        const is409 = typeof error.message === 'string' && error.message.includes('409');
+
+        console.warn(`⚠️ [BNC] LogOn intento ${attempt}/${maxAttempts} falló: ${error.message}`);
+
+        // Si es 409 → sesión activa colgada. Esperar y reintentar.
+        if (is409 && attempt < maxAttempts) {
+          const delay = attempt * 2000; // 2s, 4s
+          console.log(`⏳ [BNC] Sesión previa activa. Reintentando en ${delay}ms...`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        // Si no es 409 o ya agotamos los intentos, salimos
+        break;
       }
-      throw new Error(`Error en autenticación: ${error.message}`);
     }
+
+    // Fallback para modo test
+    if (process.env.BNC_TEST_MODE === 'true') {
+      this.workingKey = 'test-fallback-key-' + Date.now();
+      return this.workingKey;
+    }
+
+    throw new Error(`Error en autenticación: ${lastError?.message || 'desconocido'}`);
   }
 
   async getBCVRate(): Promise<BCVRateResponse> {
