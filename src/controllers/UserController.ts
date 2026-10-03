@@ -39,7 +39,7 @@ const convertSafeLocal = async (amountBs: number): Promise<number> => {
 
 export class User {
             //#region: Crear usuarios Nuevos post('/adduser')
-       //#region: Crear usuarios Nuevos post('/adduser')
+    //#region: Crear usuarios Nuevos post('/adduser')
     private static async convertBsToUSD(amountBs: number): Promise<number> {
     const bcvRate = await BillingService.getCurrentBCVRate();
     return amountBs / bcvRate;
@@ -60,8 +60,9 @@ static adduser = async (req: Request, res: Response) => {
         }: typeuserlogin_full = req.body;
 
         // ── VALIDACIÓN DE PERMISOS POR NIVEL ─────────────────────
-        // Nivel 3 (Funcional) solo puede crear usuarios de nivel 1 (Representante).
-        // Nivel 2 (Admin) puede crear cualquier nivel.
+        // Nivel 2 (Admin): puede crear cualquier nivel
+        // Nivel 3 (Funcional): solo puede crear nivel 1 (Representante)
+        // Nivel 4 (Secretario): no puede crear usuarios
         const requesterNivel = Number(req.tokenData?.nivel);
         const targetNivel = Number(userFields.nivel) || 1;
 
@@ -73,11 +74,26 @@ static adduser = async (req: Request, res: Response) => {
                 error: ['No tienes permisos para crear usuarios de este nivel']
             });
         }
+
+        if (requesterNivel === 4) {
+            await transaction.rollback();
+            return res.status(403).json({
+                result: false,
+                content: [],
+                error: ['No tienes permisos para crear usuarios']
+            });
+        }
         // ─────────────────────────────────────────────────────────
 
-        if (Number(userFields.nivel) === 2 && (!phone || !identityCard)) {
+        // Nivel 2 (Administrador), Nivel 3 (Funcional) y Nivel 4 (Secretario)
+        // requieren teléfono y cédula
+        const requiresContactData = Number(userFields.nivel) === 2
+            || Number(userFields.nivel) === 3
+            || Number(userFields.nivel) === 4;
+
+        if (requiresContactData && (!phone || !identityCard)) {
             await transaction.rollback();
-            return res.status(400).json({ result: false, content: [], error: ['Teléfono y cédula son obligatorios para administradores'] });
+            return res.status(400).json({ result: false, content: [], error: ['Teléfono y cédula son obligatorios para este rol'] });
         }
 
         // Verificar si el email ya existe
@@ -114,8 +130,7 @@ static adduser = async (req: Request, res: Response) => {
             }
         }
 
-        // ✅ NUEVA VALIDACIÓN PREVIA: si algún estudiante tiene una cédula ya
-        // registrada, abortamos TODO.
+        // Validación previa de cédulas de estudiantes
         if (
             Number(userFields.nivel) === 1 &&
             studentsData &&
@@ -157,7 +172,10 @@ static adduser = async (req: Request, res: Response) => {
             userpass: userpass,
             nivel: userFields.nivel || 1,
             userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true,
-            ...(Number(userFields.nivel) === 2 ? { phone, identityCard } : {})
+            // Se persiste para Admin (2), Funcional (3) y Secretario (4)
+            ...(Number(userFields.nivel) === 2 || Number(userFields.nivel) === 3 || Number(userFields.nivel) === 4
+                ? { phone, identityCard }
+                : {})
         }, { transaction });
 
         // Si es representante (nivel 1) Y hay datos de representante
