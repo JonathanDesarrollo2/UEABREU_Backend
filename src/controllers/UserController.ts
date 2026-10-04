@@ -39,6 +39,7 @@ const convertSafeLocal = async (amountBs: number): Promise<number> => {
 
 export class User {
             //#region: Crear usuarios Nuevos post('/adduser')
+    //#region: Crear usuarios Nuevos post('/adduser')
     private static async convertBsToUSD(amountBs: number): Promise<number> {
     const bcvRate = await BillingService.getCurrentBCVRate();
     return amountBs / bcvRate;
@@ -58,9 +59,41 @@ static adduser = async (req: Request, res: Response) => {
             ...userFields
         }: typeuserlogin_full = req.body;
 
-        if (Number(userFields.nivel) === 2 && (!phone || !identityCard)) {
+        // ── VALIDACIÓN DE PERMISOS POR NIVEL ─────────────────────
+        // Nivel 2 (Admin): puede crear cualquier nivel
+        // Nivel 3 (Funcional): solo puede crear nivel 1 (Representante)
+        // Nivel 4 (Secretario): no puede crear usuarios
+        const requesterNivel = Number(req.tokenData?.nivel);
+        const targetNivel = Number(userFields.nivel) || 1;
+
+        if (requesterNivel === 3 && targetNivel !== 1) {
             await transaction.rollback();
-            return res.status(400).json({ result: false, content: [], error: ['Teléfono y cédula son obligatorios para administradores'] });
+            return res.status(403).json({
+                result: false,
+                content: [],
+                error: ['No tienes permisos para crear usuarios de este nivel']
+            });
+        }
+
+        if (requesterNivel === 4) {
+            await transaction.rollback();
+            return res.status(403).json({
+                result: false,
+                content: [],
+                error: ['No tienes permisos para crear usuarios']
+            });
+        }
+        // ─────────────────────────────────────────────────────────
+
+        // Nivel 2 (Administrador), Nivel 3 (Funcional) y Nivel 4 (Secretario)
+        // requieren teléfono y cédula
+        const requiresContactData = Number(userFields.nivel) === 2
+            || Number(userFields.nivel) === 3
+            || Number(userFields.nivel) === 4;
+
+        if (requiresContactData && (!phone || !identityCard)) {
+            await transaction.rollback();
+            return res.status(400).json({ result: false, content: [], error: ['Teléfono y cédula son obligatorios para este rol'] });
         }
 
         // Verificar si el email ya existe
@@ -97,10 +130,7 @@ static adduser = async (req: Request, res: Response) => {
             }
         }
 
-        // ✅ NUEVA VALIDACIÓN PREVIA: si algún estudiante tiene una cédula ya
-        // registrada, abortamos TODO (no se crea usuario, ni representante,
-        // ni estudiantes) y devolvemos un mensaje claro para que el frontend
-        // muestre la alerta y bloquee el registro.
+        // Validación previa de cédulas de estudiantes
         if (
             Number(userFields.nivel) === 1 &&
             studentsData &&
@@ -142,8 +172,10 @@ static adduser = async (req: Request, res: Response) => {
             userpass: userpass,
             nivel: userFields.nivel || 1,
             userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true,
-            // Solo se persisten para el usuario administrativo (nivel 2).
-            ...(Number(userFields.nivel) === 2 ? { phone, identityCard } : {})
+            // Se persiste para Admin (2), Funcional (3) y Secretario (4)
+            ...(Number(userFields.nivel) === 2 || Number(userFields.nivel) === 3 || Number(userFields.nivel) === 4
+                ? { phone, identityCard }
+                : {})
         }, { transaction });
 
         // Si es representante (nivel 1) Y hay datos de representante
@@ -152,14 +184,12 @@ static adduser = async (req: Request, res: Response) => {
             if (!representativeData || !representativeData.identityCard) {
                 // No hacemos rollback porque el usuario ya se creó
             } else {
-                // Verificar si la cédula del representante ya existe
                 const existingRep = await Representative.findOne({
                     where: { identityCard: representativeData.identityCard },
                     transaction
                 });
 
                 if (!existingRep) {
-                    // Crear el representante SIN BALANCE
                     try {
                         const newRepresentative = await Representative.create({
                             fullName: representativeData.fullName,
@@ -174,12 +204,11 @@ static adduser = async (req: Request, res: Response) => {
                             userId: newUser.id
                         }, { transaction });
 
-                        // CREAR ESTUDIANTES con savepoints para aislar fallos
                         if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
                             console.log(`[adduser] Procesando ${studentsData.length} estudiante(s)...`);
 
                             const initialBalance = Number(representativeData.initialBalance) || 0;
-                            const initialBalanceUSD = await convertSafeLocal (initialBalance);
+                            const initialBalanceUSD = await convertSafeLocal(initialBalance);
                             const perStudentBalanceUSD = studentsData.length > 0 ? initialBalanceUSD / studentsData.length : 0;
 
                             let createdCount = 0;
@@ -207,7 +236,6 @@ static adduser = async (req: Request, res: Response) => {
                                     continue;
                                 }
 
-                                // ✅ Savepoint 1: crear el estudiante de forma aislada
                                 const studentSavepoint = await sequelize.transaction({ transaction });
                                 let newStudent: Student | null = null;
 
@@ -270,7 +298,6 @@ static adduser = async (req: Request, res: Response) => {
                                     continue;
                                 }
 
-                                // ✅ Savepoint 2: aplicar cuotas (si falla, el estudiante ya quedó creado)
                                 if (newStudent && newStudent.id) {
                                     const feeSavepoint = await sequelize.transaction({ transaction });
                                     try {
@@ -308,7 +335,6 @@ static adduser = async (req: Request, res: Response) => {
             }
         }
 
-        // Confirmar transacción
         await transaction.commit();
 
         res.status(200).json({
