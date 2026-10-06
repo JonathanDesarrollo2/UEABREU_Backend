@@ -11,7 +11,7 @@ import { getErrorLocation } from "../utility/callerinfo";
 import sequelize from "../database/config";
 import { Op } from "sequelize";
 import BlockTimeConfig from "../database/models/blockTimeConfig";
-// Función auxiliar para obtener nombre del período
+
 function getPeriodName(blockNumber: number): string {
   const names: Record<number, string> = {
     1: 'Primer Horario', 2: 'Segundo Horario', 3: 'Tercer Horario',
@@ -21,18 +21,18 @@ function getPeriodName(blockNumber: number): string {
   return names[blockNumber] || `Bloque ${blockNumber}`;
 }
 
-// Valores por defecto (deben coincidir con los de BlockTimeConfigController)
 const DEFAULT_BLOCK_TIMES = [
-  { blockNumber: 1, startTime: '07:00', endTime: '07:40', isActive: true },
-  { blockNumber: 2, startTime: '07:40', endTime: '08:20', isActive: true },
-  { blockNumber: 3, startTime: '08:20', endTime: '09:00', isActive: true },
-  { blockNumber: 4, startTime: '09:00', endTime: '09:40', isActive: true },
-  { blockNumber: 5, startTime: '09:40', endTime: '10:00', isActive: true },
+  { blockNumber: 1, startTime: '7:00',  endTime: '7:40',  isActive: true },
+  { blockNumber: 2, startTime: '7:40',  endTime: '8:20',  isActive: true },
+  { blockNumber: 3, startTime: '8:20',  endTime: '9:00',  isActive: true },
+  { blockNumber: 4, startTime: '9:00',  endTime: '9:40',  isActive: true },
+  { blockNumber: 5, startTime: '9:40',  endTime: '10:00', isActive: true },
   { blockNumber: 6, startTime: '10:00', endTime: '10:40', isActive: true },
   { blockNumber: 7, startTime: '10:40', endTime: '11:20', isActive: true },
   { blockNumber: 8, startTime: '11:20', endTime: '12:00', isActive: true },
   { blockNumber: 9, startTime: '12:20', endTime: '12:40', isActive: true },
 ];
+
 export class ScheduleController {
   
   // Crear horario
@@ -53,20 +53,17 @@ export class ScheduleController {
         });
       }
 
-      // Validar que el código tenga 7 dígitos
       if (scheduleData.code.length !== 7) {
         await transaction.rollback();
         return res.status(400).json({ 
           result: false, 
           content: [], 
-          error: ['El código debe tener exactamente 7 dígitos'] 
+          error: ['El código debe tener exactamente 7 caracteres'] 
         });
       }
 
-      // Determinar si es receso (subjectId es null)
       const isRecess = !scheduleData.subjectId;
 
-      // Validar y ajustar bloques
       let startBlock = scheduleData.startBlock;
       let endBlock = scheduleData.endBlock;
 
@@ -80,10 +77,8 @@ export class ScheduleController {
       }
 
       if (isRecess) {
-        // Receso: ocupa un solo bloque
         endBlock = startBlock;
       } else {
-        // Materia normal: ocupa dos bloques consecutivos
         endBlock = startBlock + 1;
         if (endBlock > 9) {
           await transaction.rollback();
@@ -95,7 +90,31 @@ export class ScheduleController {
         }
       }
 
-      // Si se proporcionó materia, verificamos que exista
+      // ✅ NUEVO: Validación de código consistente
+      // Si el código ya existe (fue usado antes en otro día/bloque),
+      // debe tener EXACTAMENTE la misma materia, docente, aula y edificio.
+      const existingWithSameCode = await Schedule.findOne({
+        where: { code: scheduleData.code },
+        transaction
+      });
+
+      if (existingWithSameCode) {
+        const sameSubject = (existingWithSameCode.subjectId || null) === (scheduleData.subjectId || null);
+        const sameTeacher = (existingWithSameCode.teacherId || null) === (scheduleData.teacherId || null);
+        const sameClassroom = (existingWithSameCode.classroom || null) === (scheduleData.classroom || null);
+        const sameBuilding = (existingWithSameCode.building || null) === (scheduleData.building || null);
+
+        if (!sameSubject || !sameTeacher || !sameClassroom || !sameBuilding) {
+          await transaction.rollback();
+          return res.status(400).json({
+            result: false,
+            content: [],
+            error: ['El código ya existe pero con datos diferentes. Si reutilizas un horario, debe tener la misma materia, docente, aula y edificio.']
+          });
+        }
+      }
+
+      // Validar que la materia exista (si se proporciona)
       if (!isRecess && scheduleData.subjectId) {
         const subject = await Subject.findByPk(scheduleData.subjectId, { transaction });
         if (!subject) {
@@ -108,7 +127,7 @@ export class ScheduleController {
         }
       }
 
-      // Verificar que el docente exista (si se proporciona)
+      // Validar docente
       if (scheduleData.teacherId) {
         const teacher = await Teacher.findByPk(scheduleData.teacherId, { transaction });
         if (!teacher) {
@@ -129,16 +148,13 @@ export class ScheduleController {
       };
 
       if (isRecess) {
-        // Para receso: verificar si hay algún horario que ocupe exactamente este bloque
         overlappingCondition = {
           ...overlappingCondition,
           [Op.or]: [
-            // Un horario normal que cubra este bloque
             {
               startBlock: { [Op.lte]: startBlock },
               endBlock: { [Op.gte]: startBlock }
             },
-            // Un receso exactamente en este bloque
             {
               startBlock: startBlock,
               subjectId: null
@@ -146,16 +162,13 @@ export class ScheduleController {
           ]
         };
       } else {
-        // Para materia normal: verificar si algún horario ocupa startBlock o startBlock+1
         overlappingCondition = {
           ...overlappingCondition,
           [Op.or]: [
-            // Horarios que cubren startBlock
             {
               startBlock: { [Op.lte]: startBlock },
               endBlock: { [Op.gte]: startBlock }
             },
-            // Horarios que cubren startBlock+1
             {
               startBlock: { [Op.lte]: startBlock + 1 },
               endBlock: { [Op.gte]: startBlock + 1 }
@@ -178,7 +191,6 @@ export class ScheduleController {
         });
       }
 
-      // Crear horario
       const newSchedule = await Schedule.create({
         ...scheduleData,
         startBlock,
@@ -188,7 +200,6 @@ export class ScheduleController {
       }, { transaction });
       await transaction.commit();
 
-      // Obtener información completa del horario creado
       const scheduleWithDetails = await Schedule.findByPk(newSchedule.id, {
         include: [
           {
@@ -229,6 +240,51 @@ export class ScheduleController {
     }
   };
 
+  // ✅ NUEVO: Obtener códigos únicos de horarios (para el dropdown "Cargar existente")
+  static getUniqueScheduleCodes = async (req: Request, res: Response) => {
+    try {
+      const schedules = await Schedule.findAll({
+        include: [
+          { model: Subject, as: 'subject', attributes: ['id', 'name', 'code'] },
+          { model: Teacher, as: 'teacher', attributes: ['id', 'fullName'] }
+        ],
+        order: [['code', 'ASC'], ['createdAt', 'ASC']]
+      });
+
+      // Agrupar por code único, quedándonos con la primera aparición
+      const byCode = new Map<string, any>();
+      schedules.forEach((s: any) => {
+        if (!byCode.has(s.code)) {
+          byCode.set(s.code, {
+            id: s.id, // id del primer registro con este código
+            code: s.code,
+            subjectId: s.subjectId || null,
+            subjectName: s.subject?.name || null,
+            subjectCode: s.subject?.code || null,
+            teacherId: s.teacherId || null,
+            teacherName: s.teacher?.fullName || null,
+            classroom: s.classroom || null,
+            building: s.building || null,
+            isRecess: !s.subjectId,
+          });
+        }
+      });
+
+      res.status(200).json({
+        result: true,
+        content: Array.from(byCode.values()),
+        error: []
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getUniqueScheduleCodes"));
+      res.status(500).json({
+        result: false,
+        content: [],
+        error: ['Error al obtener códigos de horarios']
+      });
+    }
+  };
+
   // Obtener horarios por grado y sección (vista previa)
   static getSchedulesByGradeSection = async (req: Request, res: Response) => {
     try {
@@ -258,7 +314,6 @@ export class ScheduleController {
         ]
       });
 
-      // Organizar por día según la estructura del frontend
       const blockTimes = this.getBlockTimes();
       const schedulesByDay: any = {
         lunes: [],
@@ -268,7 +323,6 @@ export class ScheduleController {
         viernes: []
       };
 
-      // Inicializar todos los bloques para cada día
       Object.keys(schedulesByDay).forEach(day => {
         schedulesByDay[day] = blockTimes.map((block: any) => ({
           blockId: block.id,
@@ -283,7 +337,6 @@ export class ScheduleController {
         }));
       });
 
-      // Asignar horarios a los bloques correspondientes
       schedules.forEach(schedule => {
         if (schedule.day && schedulesByDay[schedule.day]) {
           const blockIndex = schedulesByDay[schedule.day].findIndex(
@@ -291,11 +344,9 @@ export class ScheduleController {
           );
           
           if (blockIndex !== -1) {
-            // Determinar si es receso
             const isRecess = !schedule.subjectId;
             const spans = isRecess ? 1 : 2;
             
-            // Marcar el bloque principal
             schedulesByDay[schedule.day][blockIndex] = {
               ...schedulesByDay[schedule.day][blockIndex],
               subject: isRecess ? "RECESO" : schedule.subject?.name,
@@ -307,7 +358,6 @@ export class ScheduleController {
               isBreak: isRecess
             };
             
-            // Si es materia normal (spans=2), marcar el siguiente bloque como ocupado
             if (!isRecess && blockIndex + 1 < schedulesByDay[schedule.day].length) {
               schedulesByDay[schedule.day][blockIndex + 1] = {
                 ...schedulesByDay[schedule.day][blockIndex + 1],
@@ -339,35 +389,17 @@ export class ScheduleController {
     }
   };
 
-  // ... resto de métodos (getSchedules, getScheduleById, updateSchedule, deleteSchedule, etc.) permanecen sin cambios
-
-
   // Listar horarios con filtros
   static getSchedules = async (req: Request, res: Response) => {
     try {
       const { grade, section, day, teacherId, subjectId, search } = req.query;
       const where: any = {};
 
-      // Aplicar filtros
-      if (grade) {
-        where.grade = grade;
-      }
-      
-      if (section) {
-        where.section = section;
-      }
-      
-      if (day) {
-        where.day = day;
-      }
-      
-      if (teacherId) {
-        where.teacherId = teacherId;
-      }
-
-      if (subjectId) {
-        where.subjectId = subjectId;
-      }
+      if (grade) where.grade = grade;
+      if (section) where.section = section;
+      if (day) where.day = day;
+      if (teacherId) where.teacherId = teacherId;
+      if (subjectId) where.subjectId = subjectId;
 
       if (search) {
         where[Op.or] = [
@@ -495,7 +527,6 @@ export class ScheduleController {
         });
       }
 
-      // Verificar que la materia exista (si se actualiza)
       if (updateData.subjectId) {
         const subject = await Subject.findByPk(updateData.subjectId, { transaction });
         if (!subject) {
@@ -508,7 +539,6 @@ export class ScheduleController {
         }
       }
 
-      // Verificar que el docente exista (si se actualiza)
       if (updateData.teacherId) {
         const teacher = await Teacher.findByPk(updateData.teacherId, { transaction });
         if (!teacher) {
@@ -521,7 +551,6 @@ export class ScheduleController {
         }
       }
 
-      // Validar bloques si se actualizan
       if (updateData.startBlock !== undefined || updateData.endBlock !== undefined) {
         const startBlock = updateData.startBlock || schedule.startBlock;
         const endBlock = updateData.endBlock || schedule.endBlock;
@@ -535,7 +564,6 @@ export class ScheduleController {
           });
         }
 
-        // Verificar superposición (excluyendo el propio horario)
         const overlappingSchedule = await Schedule.findOne({
           where: {
             id: { [Op.ne]: id },
@@ -607,7 +635,6 @@ export class ScheduleController {
         });
       }
 
-      // Validar si el horario tiene estudiantes asignados
       if (schedule.studentSchedules && schedule.studentSchedules.length > 0) {
         await transaction.rollback();
         return res.status(400).json({ 
@@ -636,135 +663,131 @@ export class ScheduleController {
     }
   };
 
-static getChildrenSchedules = async (req: Request, res: Response) => {
-  try {
-    const userId = req.tokenData?.id;
-    if (!userId) {
-      return res.status(401).json({ result: false, content: [], error: ['No autenticado'] });
-    }
+  static getChildrenSchedules = async (req: Request, res: Response) => {
+    try {
+      const userId = req.tokenData?.id;
+      if (!userId) {
+        return res.status(401).json({ result: false, content: [], error: ['No autenticado'] });
+      }
 
-    const representative = await Representative.findOne({ where: { userId }, attributes: ['id'] });
+      const representative = await Representative.findOne({ where: { userId }, attributes: ['id'] });
 
-    if (!representative) {
-      return res.status(404).json({ result: false, content: [], error: ['No se encontró representante'] });
-    }
+      if (!representative) {
+        return res.status(404).json({ result: false, content: [], error: ['No se encontró representante'] });
+      }
 
-    const students = await Student.findAll({ where: { representativeId: representative.id } });
-    if (students.length === 0) {
-      return res.json({ result: true, content: [], error: [] });
-    }
+      const students = await Student.findAll({ where: { representativeId: representative.id } });
+      if (students.length === 0) {
+        return res.json({ result: true, content: [], error: [] });
+      }
 
-    const result = [];
+      const result = [];
 
-    for (const student of students) {
-      const studentSchedules = await StudentSchedule.findAll({
-        where: { studentId: student.id },
-        include: [
-          {
-            model: Schedule,
-            as: 'schedule',
-            include: [
-              {
-                model: Subject,
-                as: 'subject',
-                include: [{
+      for (const student of students) {
+        const studentSchedules = await StudentSchedule.findAll({
+          where: { studentId: student.id },
+          include: [
+            {
+              model: Schedule,
+              as: 'schedule',
+              include: [
+                {
+                  model: Subject,
+                  as: 'subject',
+                  include: [{
+                    model: Teacher,
+                    as: 'teacher',
+                    attributes: ['id', 'fullName', 'email']
+                  }]
+                },
+                {
                   model: Teacher,
                   as: 'teacher',
                   attributes: ['id', 'fullName', 'email']
-                }]
-              },
-              {
-                model: Teacher,
-                as: 'teacher',
-                attributes: ['id', 'fullName', 'email']
-              }
-            ]
-          }
-        ],
-        order: [
-          [{ model: Schedule, as: 'schedule' }, 'day', 'ASC'],
-          [{ model: Schedule, as: 'schedule' }, 'startBlock', 'ASC']
-        ]
-      });
-
-      // Si el horario fue configurado para el grado/sección pero todavía no
-      // existe una fila individual en StudentSchedule, también debe ser
-      // visible para el representante.
-      const sectionSchedules = (await Schedule.findAll({
-            include: [
-              { model: Subject, as: 'subject', include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }] },
-              { model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }
-            ],
-            order: [['day', 'ASC'], ['startBlock', 'ASC']]
-          })).filter(schedule => {
-            const normalize = (value: unknown) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s*a?no\s*$/, '').replace(/\s+/g, '');
-            return normalize(schedule.grade) === normalize(student.currentGrade) && String(schedule.section || '').trim().toUpperCase() === String(student.section || '').trim().toUpperCase();
-          }).map(schedule => ({ schedule } as any));
-      const schedulesBySection = sectionSchedules.length > 0
-        ? sectionSchedules
-        : studentSchedules.filter((item: any) => item.schedule);
-
-      const schedulesByDay: Record<string, any[]> = {};
-      const blockTimesByDay: Record<string, any[]> = {};
-
-      for (const ss of schedulesBySection) {
-      const schedule = ss.schedule;
-      // ✅ Validar que exista y que los campos usados como índice no sean undefined
-      if (!schedule || !schedule.day || !schedule.startBlock || !schedule.endBlock) continue;
-
-       const day = String(schedule.day).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const startBlock = schedule.startBlock;
-      const endBlock = schedule.endBlock;
-
-      if (!schedulesByDay[day]) schedulesByDay[day] = [];
-      schedulesByDay[day].push({
-        blockId: startBlock,
-        time: `${startBlock}-${endBlock}`,
-        period: '',
-        isBreak: false,
-        isOccupied: false,
-        subject: schedule.subject?.name,
-        subjectCode: schedule.subject?.code,
-        teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
-        classroom: schedule.classroom,
-        spans: endBlock - startBlock + 1,
-      });
-
-      if (!blockTimesByDay[day]) {
-        const blocks = await BlockTimeConfig.findAll({
-          where: {
-            grade: schedule.grade || student.currentGrade || '',
-            section: schedule.section || student.section || '',
-            day: day,
-            isActive: true,
-          },
-          order: [['blockNumber', 'ASC']],
+                }
+              ]
+            }
+          ],
+          order: [
+            [{ model: Schedule, as: 'schedule' }, 'day', 'ASC'],
+            [{ model: Schedule, as: 'schedule' }, 'startBlock', 'ASC']
+          ]
         });
-        blockTimesByDay[day] = blocks.map(b => ({
-          blockNumber: b.blockNumber,
-          startTime: b.startTime ? String(b.startTime) : '',   // ✅ Convertir a string
-          endTime: b.endTime ? String(b.endTime) : '',
-          isActive: b.isActive,
-        }));
+
+        const sectionSchedules = (await Schedule.findAll({
+              include: [
+                { model: Subject, as: 'subject', include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }] },
+                { model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }
+              ],
+              order: [['day', 'ASC'], ['startBlock', 'ASC']]
+            })).filter(schedule => {
+              const normalize = (value: unknown) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s*a?no\s*$/, '').replace(/\s+/g, '');
+              return normalize(schedule.grade) === normalize(student.currentGrade) && String(schedule.section || '').trim().toUpperCase() === String(student.section || '').trim().toUpperCase();
+            }).map(schedule => ({ schedule } as any));
+        const schedulesBySection = sectionSchedules.length > 0
+          ? sectionSchedules
+          : studentSchedules.filter((item: any) => item.schedule);
+
+        const schedulesByDay: Record<string, any[]> = {};
+        const blockTimesByDay: Record<string, any[]> = {};
+
+        for (const ss of schedulesBySection) {
+          const schedule = ss.schedule;
+          if (!schedule || !schedule.day || !schedule.startBlock || !schedule.endBlock) continue;
+
+          const day = String(schedule.day).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const startBlock = schedule.startBlock;
+          const endBlock = schedule.endBlock;
+
+          if (!schedulesByDay[day]) schedulesByDay[day] = [];
+          schedulesByDay[day].push({
+            blockId: startBlock,
+            time: `${startBlock}-${endBlock}`,
+            period: '',
+            isBreak: false,
+            isOccupied: false,
+            subject: schedule.subject?.name,
+            subjectCode: schedule.subject?.code,
+            teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
+            classroom: schedule.classroom,
+            spans: endBlock - startBlock + 1,
+          });
+
+          if (!blockTimesByDay[day]) {
+            const blocks = await BlockTimeConfig.findAll({
+              where: {
+                grade: schedule.grade || student.currentGrade || '',
+                section: schedule.section || student.section || '',
+                day: day,
+                isActive: true,
+              },
+              order: [['blockNumber', 'ASC']],
+            });
+            blockTimesByDay[day] = blocks.map(b => ({
+              blockNumber: b.blockNumber,
+              startTime: b.startTime ? String(b.startTime) : '',
+              endTime: b.endTime ? String(b.endTime) : '',
+              isActive: b.isActive,
+            }));
+          }
+        }
+
+        result.push({
+          studentId: student.id,
+          studentName: student.fullName,
+          grade: student.currentGrade || '',
+          section: student.section || '',
+          schedulesByDay,
+          blockTimesByDay,
+        });
       }
-    }
 
-      result.push({
-        studentId: student.id,
-        studentName: student.fullName,
-        grade: student.currentGrade || '',
-        section: student.section || '',
-        schedulesByDay,
-        blockTimesByDay,
-      });
+      res.json({ result: true, content: result, error: [] });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getChildrenSchedules"));
+      res.status(500).json({ result: false, content: [], error: ['Error al obtener horarios de hijos'] });
     }
-
-    res.json({ result: true, content: result, error: [] });
-  } catch (error: any) {
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("getChildrenSchedules"));
-    res.status(500).json({ result: false, content: [], error: ['Error al obtener horarios de hijos'] });
-  }
-};
+  };
 
   static assignStudentToSchedule = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
@@ -772,7 +795,6 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
     try {
       const { studentId, scheduleId, scheduleType, comment1, comment2, comment3 } = req.body;
 
-      // Verificar que el estudiante exista
       const student = await Student.findByPk(studentId, { transaction });
       if (!student) {
         await transaction.rollback();
@@ -783,7 +805,6 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
         });
       }
 
-      // Verificar que el horario exista
       const schedule = await Schedule.findByPk(scheduleId, { transaction });
       if (!schedule) {
         await transaction.rollback();
@@ -794,7 +815,6 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
         });
       }
 
-      // Verificar que el estudiante no esté ya asignado a este horario
       const existingAssignment = await StudentSchedule.findOne({
         where: { studentId, scheduleId },
         transaction
@@ -809,7 +829,6 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
         });
       }
 
-      // Verificar que el estudiante no tenga conflicto de horario
       const conflictingSchedule = await StudentSchedule.findOne({
         where: {
           studentId,
@@ -834,7 +853,6 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
         });
       }
 
-      // Crear la asignación
       const assignment = await StudentSchedule.create({
         studentId,
         scheduleId,
@@ -868,14 +886,12 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
     }
   };
 
-  // Desasignar estudiante de horario
   static removeStudentFromSchedule = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     
     try {
       const { studentId, scheduleId } = req.body;
 
-      // Verificar que la asignación exista
       const assignment = await StudentSchedule.findOne({
         where: { studentId, scheduleId },
         transaction
@@ -908,7 +924,7 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
       });
     }
   };
-  // Obtener estudiantes asignados a un horario
+
   static getStudentsBySchedule = async (req: Request, res: Response) => {
     try {
       const { scheduleId } = req.params;
@@ -945,7 +961,6 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
     }
   };
 
-  // Método auxiliar: Obtener rango de tiempo según bloques
   private static getTimeRange(startBlock?: number, endBlock?: number): string {
     if (!startBlock || !endBlock) return '';
     
@@ -967,7 +982,6 @@ static getChildrenSchedules = async (req: Request, res: Response) => {
     return startTime && endTime ? `${startTime} - ${endTime}` : '';
   }
 
-  // Método auxiliar: Definición de bloques de tiempo (sin receso fijo)
   private static getBlockTimes() {
     return [
       { id: 1, time: '7:00 - 7:40', period: 'Primer Horario' },
