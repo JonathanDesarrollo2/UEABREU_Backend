@@ -30,17 +30,19 @@ class BankCrypto {
     };
   }
 
+  // ✅ AES con entrada/salida en UTF-16LE (igual que la documentación del banco)
   static encryptAES(plainText: string, key: Buffer, iv: Buffer): string {
     const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-    let encrypted = cipher.update(plainText, 'utf8', 'base64');
+    let encrypted = cipher.update(plainText, 'utf16le', 'base64');
     encrypted += cipher.final('base64');
     return encrypted;
   }
 
+  // ✅ AES con entrada/salida en UTF-16LE (igual que la documentación del banco)
   static decryptAES(encryptedBase64: string, key: Buffer, iv: Buffer): string {
     const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-    let decrypted = decipher.update(encryptedBase64, 'base64', 'utf8');
-    decrypted += decipher.final('utf8');
+    let decrypted = decipher.update(encryptedBase64, 'base64', 'utf16le');
+    decrypted += decipher.final('utf16le');
     return decrypted;
   }
 
