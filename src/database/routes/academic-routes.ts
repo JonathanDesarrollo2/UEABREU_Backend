@@ -123,6 +123,12 @@ AcademicRouter.post('/schedule/add',
   ScheduleController.addSchedule
 );
 
+// ✅ NUEVO: Lista de códigos únicos (debe ir ANTES de /schedule/:id)
+AcademicRouter.get('/schedule/codes/list',
+  authsession,
+  ScheduleController.getUniqueScheduleCodes
+);
+
 AcademicRouter.get('/schedule/list',
   authsession,
   query('grade').optional().isString(),
@@ -135,13 +141,13 @@ AcademicRouter.get('/schedule/list',
   ScheduleController.getSchedules
 );
 
-// 🎯 **RUTA FIJA: Horarios de los hijos del representante (DEBE IR ANTES DE /:id)**
+// Horarios de los hijos del representante (debe ir ANTES de /schedule/:id)
 AcademicRouter.get('/schedule/my-children',
   authsession,
   ScheduleController.getChildrenSchedules
 );
 
-// Ruta con parámetro :id (DEBE IR DESPUÉS DE LAS RUTAS FIJAS)
+// Ruta con parámetro :id (debe ir DESPUÉS de las rutas fijas)
 AcademicRouter.get('/schedule/:id',
   authsession,
   param('id').isUUID().withMessage('ID inválido'),
@@ -175,7 +181,6 @@ AcademicRouter.get('/schedule/grade/:grade/section/:section',
   ScheduleController.getSchedulesByGradeSection
 );
 
-// Asignar estudiante a horario
 AcademicRouter.post('/schedule/assign-student',
   authsession,
   body('studentId').notEmpty().isUUID().withMessage('ID de estudiante inválido'),
@@ -185,7 +190,6 @@ AcademicRouter.post('/schedule/assign-student',
   ScheduleController.assignStudentToSchedule
 );
 
-// Desasignar estudiante de horario
 AcademicRouter.post('/schedule/remove-student',
   authsession,
   body('studentId').notEmpty().isUUID().withMessage('ID de estudiante inválido'),

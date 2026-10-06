@@ -6,11 +6,11 @@ import sequelize from "../database/config";
 import BlockTimeConfig from "../database/models/blockTimeConfig";
 
 const DEFAULT_BLOCK_TIMES = [
-  { blockNumber: 1, startTime: '07:00', endTime: '07:40' },
-  { blockNumber: 2, startTime: '07:40', endTime: '08:20' },
-  { blockNumber: 3, startTime: '08:20', endTime: '09:00' },
-  { blockNumber: 4, startTime: '09:00', endTime: '09:40' },
-  { blockNumber: 5, startTime: '09:40', endTime: '10:00' },
+  { blockNumber: 1, startTime: '7:00',  endTime: '7:40'  },
+  { blockNumber: 2, startTime: '7:40',  endTime: '8:20'  },
+  { blockNumber: 3, startTime: '8:20',  endTime: '9:00'  },
+  { blockNumber: 4, startTime: '9:00',  endTime: '9:40'  },
+  { blockNumber: 5, startTime: '9:40',  endTime: '10:00' },
   { blockNumber: 6, startTime: '10:00', endTime: '10:40' },
   { blockNumber: 7, startTime: '10:40', endTime: '11:20' },
   { blockNumber: 8, startTime: '11:20', endTime: '12:00' },
@@ -66,6 +66,7 @@ export class BlockTimeConfigController {
       });
     }
   };
+
   static saveBlockTimes = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
@@ -80,7 +81,6 @@ export class BlockTimeConfigController {
         });
       }
 
-      // Validar cada bloque
       for (const block of blocks) {
         if (!block.blockNumber || !block.startTime || !block.endTime) {
           await transaction.rollback();
@@ -92,17 +92,15 @@ export class BlockTimeConfigController {
         }
       }
 
-      // Eliminar configuraciones existentes para ese grado, sección y día
       await BlockTimeConfig.destroy({
         where: { grade, section, day },
         transaction
       });
 
-      // Crear nuevas configuraciones incluyendo el día
       const newConfigs = blocks.map(block => ({
         grade,
         section,
-        day,   // ← AGREGADO
+        day,
         blockNumber: block.blockNumber,
         startTime: block.startTime,
         endTime: block.endTime,
@@ -146,17 +144,15 @@ export class BlockTimeConfigController {
         });
       }
 
-      // Eliminar configuraciones existentes
       await BlockTimeConfig.destroy({
         where: { grade, section, day },
         transaction
       });
 
-      // Insertar valores por defecto incluyendo el día
       const defaultConfigs = DEFAULT_BLOCK_TIMES.map(block => ({
         grade,
         section,
-        day,   // ← AGREGADO
+        day,
         blockNumber: block.blockNumber,
         startTime: block.startTime,
         endTime: block.endTime,
@@ -191,7 +187,6 @@ export class BlockTimeConfigController {
         order: [['grade', 'ASC'], ['section', 'ASC'], ['day', 'ASC'], ['blockNumber', 'ASC']]
       });
 
-      // Agrupar por grado, sección y día
       const grouped: any = {};
       configs.forEach(c => {
         const key = `${c.grade}-${c.section}-${c.day}`;
