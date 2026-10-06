@@ -341,10 +341,20 @@ export class BankAPI {
     };
 
     try {
-      const now = new Date();
       const pad = (n: number) => n.toString().padStart(2, '0');
-      const formattedDate = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
+      // ✅ Usar la fecha que ingresó el usuario (formato ISO: "2026-10-01T00:00:00" o "2026-10-01")
+      // El banco espera el formato "yyyy/MM/ddThh:mm:ss".
+      // Si el frontend no envía fecha, se usa la fecha actual (fallback).
+      let movementDate: Date;
+      if (validationData.RequestDate) {
+        const parsed = new Date(validationData.RequestDate);
+        movementDate = !isNaN(parsed.getTime()) ? parsed : new Date();
+      } else {
+        movementDate = new Date();
+      }
+
+      const formattedDate = `${movementDate.getFullYear()}/${pad(movementDate.getMonth() + 1)}/${pad(movementDate.getDate())}T${pad(movementDate.getHours())}:${pad(movementDate.getMinutes())}:${pad(movementDate.getSeconds())}`;
       // Autenticar antes de cualquier validación
       if (!this.workingKey) {
         await this.authenticate();
