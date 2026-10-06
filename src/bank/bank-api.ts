@@ -328,6 +328,7 @@ export class BankAPI {
     async cascadedValidation(validationData: any): Promise<CascadedValidationResult> {
     // ⚠️ RIF del colegio afiliado al BNC (SIEMPRE el mismo, no viene del frontend)
     const SCHOOL_CLIENT_ID = 'J505275356';
+    const SCHOOL_ACCOUNT = '01910107012100104749';
 
     const result: CascadedValidationResult = {
       overallResult: 'error',
@@ -370,7 +371,7 @@ export class BankAPI {
       // 1. Validación P2P
       try {
         const p2pPayload: any = {
-          AccountNumber: validationData.AccountNumber,
+          AccountNumber: SCHOOL_ACCOUNT,
           BankCode: validationData.BankCode,
           PhoneNumber: validationData.PhoneNumber,
           ClientID: SCHOOL_CLIENT_ID, // ← RIF del colegio (fijo)
@@ -409,7 +410,7 @@ export class BankAPI {
       try {
         const refPayload: any = {
           ClientID: SCHOOL_CLIENT_ID, // ← RIF del colegio (fijo)
-          AccountNumber: validationData.AccountNumber,
+          AccountNumber: SCHOOL_ACCOUNT,
           Reference: String(validationData.Reference),
           Amount: Number(validationData.Amount),
           DateMovement: formattedDate,
@@ -444,7 +445,7 @@ export class BankAPI {
       // 3. Validación de Existencia
       try {
         const existencePayload: any = {
-          AccountNumber: validationData.AccountNumber,
+          AccountNumber: SCHOOL_ACCOUNT,
           BankCode: validationData.BankCode,
           PhoneNumber: validationData.PhoneNumber,
           ClientID: SCHOOL_CLIENT_ID, // ← RIF del colegio (fijo)
