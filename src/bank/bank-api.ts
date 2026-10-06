@@ -62,11 +62,15 @@ export class BankAPI {
     this.masterKey = process.env.BNC_MASTER_KEY || '';
   }
 
-  private generateReference(): string {
+    private generateReference(): string {
     const now = new Date();
     const dateStr = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
+    const timeStr = `${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}${now.getSeconds().toString().padStart(2, '0')}`;
+    const ms = now.getMilliseconds().toString().padStart(3, '0');
     this.referenceCounter = (this.referenceCounter + 1) % 10000;
-    return `REF-${dateStr}-${this.referenceCounter.toString().padStart(4, '0')}`;
+    const counter = this.referenceCounter.toString().padStart(4, '0');
+    // ✅ Solo alfanumérico — sin guiones ni símbolos
+    return `REF${dateStr}${timeStr}${ms}${counter}`;
   }
 
   private async sendRequest<T>(
