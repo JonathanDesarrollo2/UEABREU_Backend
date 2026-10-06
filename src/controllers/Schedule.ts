@@ -35,14 +35,12 @@ const DEFAULT_BLOCK_TIMES = [
 
 export class ScheduleController {
   
-  // Crear horario
   static addSchedule = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     
     try {
       const scheduleData = req.body;
 
-      // Validaciones básicas
       if (!scheduleData.code || !scheduleData.grade || !scheduleData.section || 
           !scheduleData.day) {
         await transaction.rollback();
@@ -90,31 +88,30 @@ export class ScheduleController {
         }
       }
 
-      // ✅ NUEVO: Validación de código consistente
-      // Si el código ya existe (fue usado antes en otro día/bloque),
-      // debe tener EXACTAMENTE la misma materia, docente, aula y edificio.
-      const existingWithSameCode = await Schedule.findOne({
-        where: { code: scheduleData.code },
-        transaction
-      });
+      // ✅ Validación de código consistente — SOLO para materias (no para recesos)
+      if (!isRecess) {
+        const existingWithSameCode = await Schedule.findOne({
+          where: { code: scheduleData.code },
+          transaction
+        });
 
-      if (existingWithSameCode) {
-        const sameSubject = (existingWithSameCode.subjectId || null) === (scheduleData.subjectId || null);
-        const sameTeacher = (existingWithSameCode.teacherId || null) === (scheduleData.teacherId || null);
-        const sameClassroom = (existingWithSameCode.classroom || null) === (scheduleData.classroom || null);
-        const sameBuilding = (existingWithSameCode.building || null) === (scheduleData.building || null);
+        if (existingWithSameCode) {
+          const sameSubject = (existingWithSameCode.subjectId || null) === (scheduleData.subjectId || null);
+          const sameTeacher = (existingWithSameCode.teacherId || null) === (scheduleData.teacherId || null);
+          const sameClassroom = (existingWithSameCode.classroom || null) === (scheduleData.classroom || null);
+          const sameBuilding = (existingWithSameCode.building || null) === (scheduleData.building || null);
 
-        if (!sameSubject || !sameTeacher || !sameClassroom || !sameBuilding) {
-          await transaction.rollback();
-          return res.status(400).json({
-            result: false,
-            content: [],
-            error: ['El código ya existe pero con datos diferentes. Si reutilizas un horario, debe tener la misma materia, docente, aula y edificio.']
-          });
+          if (!sameSubject || !sameTeacher || !sameClassroom || !sameBuilding) {
+            await transaction.rollback();
+            return res.status(400).json({
+              result: false,
+              content: [],
+              error: ['El código ya existe pero con datos diferentes. Si reutilizas un horario, debe tener la misma materia, docente, aula y edificio.']
+            });
+          }
         }
       }
 
-      // Validar que la materia exista (si se proporciona)
       if (!isRecess && scheduleData.subjectId) {
         const subject = await Subject.findByPk(scheduleData.subjectId, { transaction });
         if (!subject) {
@@ -127,7 +124,6 @@ export class ScheduleController {
         }
       }
 
-      // Validar docente
       if (scheduleData.teacherId) {
         const teacher = await Teacher.findByPk(scheduleData.teacherId, { transaction });
         if (!teacher) {
@@ -231,16 +227,35 @@ export class ScheduleController {
       });
     } catch (error: any) {
       await transaction.rollback();
+
+      let detail = error?.message || 'Error desconocido';
+      if (Array.isArray(error?.errors) && error.errors.length > 0) {
+        detail = error.errors
+          .map((e: any) => `${e.path || e.validatorKey || 'campo'}: ${e.message}`)
+          .join(' | ');
+      }
+
+      console.error('🚨 [addSchedule] Error completo:', JSON.stringify({
+        name: error?.name,
+        message: error?.message,
+        errors: error?.errors?.map((e: any) => ({
+          path: e.path,
+          message: e.message,
+          validatorKey: e.validatorKey,
+          type: e.type,
+        })),
+      }, null, 2));
+
       ErrorLog.createErrorLog(error, 'Server', getErrorLocation("addSchedule"));
       res.status(500).json({ 
         result: false, 
         content: [], 
-        error: [`Error al crear horario: ${error.message}`] 
+        error: [`Error al crear horario: ${detail}`] 
       });
     }
   };
 
-  // ✅ NUEVO: Obtener códigos únicos de horarios (para el dropdown "Cargar existente")
+  // ✅ Códigos únicos para el dropdown — EXCLUYE RECESOS
   static getUniqueScheduleCodes = async (req: Request, res: Response) => {
     try {
       const schedules = await Schedule.findAll({
@@ -251,12 +266,14 @@ export class ScheduleController {
         order: [['code', 'ASC'], ['createdAt', 'ASC']]
       });
 
-      // Agrupar por code único, quedándonos con la primera aparición
       const byCode = new Map<string, any>();
       schedules.forEach((s: any) => {
+        // ✅ Excluir recesos: no se muestran en el listado de "Cargar existente"
+        if (!s.subjectId) return;
+
         if (!byCode.has(s.code)) {
           byCode.set(s.code, {
-            id: s.id, // id del primer registro con este código
+            id: s.id,
             code: s.code,
             subjectId: s.subjectId || null,
             subjectName: s.subject?.name || null,
@@ -265,7 +282,7 @@ export class ScheduleController {
             teacherName: s.teacher?.fullName || null,
             classroom: s.classroom || null,
             building: s.building || null,
-            isRecess: !s.subjectId,
+            isRecess: false,
           });
         }
       });
@@ -285,7 +302,6 @@ export class ScheduleController {
     }
   };
 
-  // Obtener horarios por grado y sección (vista previa)
   static getSchedulesByGradeSection = async (req: Request, res: Response) => {
     try {
       const { grade, section } = req.params;
@@ -389,7 +405,6 @@ export class ScheduleController {
     }
   };
 
-  // Listar horarios con filtros
   static getSchedules = async (req: Request, res: Response) => {
     try {
       const { grade, section, day, teacherId, subjectId, search } = req.query;
@@ -455,7 +470,6 @@ export class ScheduleController {
     }
   };
 
-  // Obtener horario por ID
   static getScheduleById = async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -510,7 +524,6 @@ export class ScheduleController {
     }
   };
 
-  // Actualizar horario
   static updateSchedule = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     
@@ -611,7 +624,6 @@ export class ScheduleController {
     }
   };
 
-  // Eliminar horario con validaciones
   static deleteSchedule = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     
