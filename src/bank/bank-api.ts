@@ -319,7 +319,10 @@ export class BankAPI {
     }
   }
 
-  async cascadedValidation(validationData: any): Promise<CascadedValidationResult> {
+    async cascadedValidation(validationData: any): Promise<CascadedValidationResult> {
+    // ⚠️ RIF del colegio afiliado al BNC (SIEMPRE el mismo, no viene del frontend)
+    const SCHOOL_CLIENT_ID = 'J505275356';
+
     const result: CascadedValidationResult = {
       overallResult: 'error',
       message: '',
@@ -335,11 +338,12 @@ export class BankAPI {
       const now = new Date();
       const pad = (n: number) => n.toString().padStart(2, '0');
       const formattedDate = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-            // ✅ AUTENTICAR ANTES DE CUALQUIER VALIDACIÓN
-      // Sin esto, sendRequest falla inmediatamente con "No hay clave de encriptación disponible"
+
+      // Autenticar antes de cualquier validación
       if (!this.workingKey) {
         await this.authenticate();
       }
+
       const childClientID = validationData.ChildClientID && validationData.ChildClientID.trim() !== ''
         ? validationData.ChildClientID
         : undefined;
@@ -347,18 +351,21 @@ export class BankAPI {
         ? validationData.BranchID
         : undefined;
 
+      // 1. Validación P2P
       try {
         const p2pPayload: any = {
           AccountNumber: validationData.AccountNumber,
           BankCode: validationData.BankCode,
           PhoneNumber: validationData.PhoneNumber,
-          ClientID: validationData.ClientID,
+          ClientID: SCHOOL_CLIENT_ID, // ← RIF del colegio (fijo)
           Reference: String(validationData.Reference),
           RequestDate: formattedDate,
           Amount: Number(validationData.Amount),
         };
         if (childClientID) p2pPayload.ChildClientID = childClientID;
         if (branchID) p2pPayload.BranchID = branchID;
+
+        console.log('🔍 [BNC] P2P payload:', JSON.stringify({ ...p2pPayload, ClientID: SCHOOL_CLIENT_ID }));
 
         const p2pResult = await this.sendRequest<ValidationResponse>('/Position/ValidateP2P', p2pPayload);
         result.details.validateP2P = {
@@ -373,7 +380,7 @@ export class BankAPI {
           return result;
         }
       } catch (error: any) {
-        console.error(`🚨 [BNC] P2P falló:`, error.message);   // ← AGREGAR
+        console.error(`🚨 [BNC] P2P falló:`, error.message);
         result.details.validateP2P = {
           executed: true,
           success: false,
@@ -382,9 +389,10 @@ export class BankAPI {
         };
       }
 
+      // 2. Validación con Referencia
       try {
         const refPayload: any = {
-          ClientID: validationData.ClientID,
+          ClientID: SCHOOL_CLIENT_ID, // ← RIF del colegio (fijo)
           AccountNumber: validationData.AccountNumber,
           Reference: String(validationData.Reference),
           Amount: Number(validationData.Amount),
@@ -392,6 +400,8 @@ export class BankAPI {
         };
         if (childClientID) refPayload.ChildClientID = childClientID;
         if (branchID) refPayload.BranchID = branchID;
+
+        console.log('🔍 [BNC] Reference payload:', JSON.stringify(refPayload));
 
         const refResult = await this.sendRequest<ValidationResponse>('/Position/Validate', refPayload);
         result.details.validateReference = {
@@ -406,7 +416,7 @@ export class BankAPI {
           return result;
         }
       } catch (error: any) {
-        console.error(`🚨 [BNC] Reference falló:`, error.message);   // ← AGREGAR
+        console.error(`🚨 [BNC] Reference falló:`, error.message);
         result.details.validateReference = {
           executed: true,
           success: false,
@@ -415,17 +425,20 @@ export class BankAPI {
         };
       }
 
+      // 3. Validación de Existencia
       try {
         const existencePayload: any = {
           AccountNumber: validationData.AccountNumber,
           BankCode: validationData.BankCode,
           PhoneNumber: validationData.PhoneNumber,
-          ClientID: validationData.ClientID,
+          ClientID: SCHOOL_CLIENT_ID, // ← RIF del colegio (fijo)
           RequestDate: formattedDate,
           Amount: Number(validationData.Amount),
         };
         if (childClientID) existencePayload.ChildClientID = childClientID;
         if (branchID) existencePayload.BranchID = branchID;
+
+        console.log('🔍 [BNC] Existence payload:', JSON.stringify(existencePayload));
 
         const existenceResult = await this.sendRequest<ValidationResponse>('/Position/ValidateExistence', existencePayload);
         result.details.validateExistence = {
@@ -440,7 +453,7 @@ export class BankAPI {
           return result;
         }
       } catch (error: any) {
-        console.error(`🚨 [BNC] Existence falló:`, error.message);   // ← AGREGAR
+        console.error(`🚨 [BNC] Existence falló:`, error.message);
         result.details.validateExistence = {
           executed: true,
           success: false,
