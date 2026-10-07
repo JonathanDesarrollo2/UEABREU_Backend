@@ -9,8 +9,8 @@ export function startDebtScheduler() {
     timezone: 'America/Caracas'
   });
 
-  // La tasa publicada a las 18:00 queda como fecha valor del día siguiente.
-  cron.schedule('0 18 * * *', async () => {
+  // La tasa publicada a las 19:00 queda como fecha valor del día siguiente.
+  cron.schedule('0 19 * * *', async () => {
     try {
       await BillingService.refreshDailyBCVRate();
     } catch {
