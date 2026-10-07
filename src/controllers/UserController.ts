@@ -39,7 +39,7 @@ const convertSafeLocal = async (amountBs: number): Promise<number> => {
 
 export class User {
             //#region: Crear usuarios Nuevos post('/adduser')
-    //#region: Crear usuarios Nuevos post('/adduser')
+        //#region: Crear usuarios Nuevos post('/adduser')
     private static async convertBsToUSD(amountBs: number): Promise<number> {
     const bcvRate = await BillingService.getCurrentBCVRate();
     return amountBs / bcvRate;
@@ -63,6 +63,7 @@ static adduser = async (req: Request, res: Response) => {
         // Nivel 2 (Admin): puede crear cualquier nivel
         // Nivel 3 (Funcional): solo puede crear nivel 1 (Representante)
         // Nivel 4 (Secretario): no puede crear usuarios
+        // Nivel 5 (Administrativo 2): no puede crear usuarios
         const requesterNivel = Number(req.tokenData?.nivel);
         const targetNivel = Number(userFields.nivel) || 1;
 
@@ -75,7 +76,7 @@ static adduser = async (req: Request, res: Response) => {
             });
         }
 
-        if (requesterNivel === 4) {
+        if (requesterNivel === 4 || requesterNivel === 5) {
             await transaction.rollback();
             return res.status(403).json({
                 result: false,
@@ -85,11 +86,12 @@ static adduser = async (req: Request, res: Response) => {
         }
         // ─────────────────────────────────────────────────────────
 
-        // Nivel 2 (Administrador), Nivel 3 (Funcional) y Nivel 4 (Secretario)
-        // requieren teléfono y cédula
+        // Nivel 2 (Administrador), Nivel 3 (Funcional), Nivel 4 (Secretario)
+        // y Nivel 5 (Administrativo 2) requieren teléfono y cédula
         const requiresContactData = Number(userFields.nivel) === 2
             || Number(userFields.nivel) === 3
-            || Number(userFields.nivel) === 4;
+            || Number(userFields.nivel) === 4
+            || Number(userFields.nivel) === 5;
 
         if (requiresContactData && (!phone || !identityCard)) {
             await transaction.rollback();
@@ -172,8 +174,8 @@ static adduser = async (req: Request, res: Response) => {
             userpass: userpass,
             nivel: userFields.nivel || 1,
             userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true,
-            // Se persiste para Admin (2), Funcional (3) y Secretario (4)
-            ...(Number(userFields.nivel) === 2 || Number(userFields.nivel) === 3 || Number(userFields.nivel) === 4
+            // Se persiste para Admin (2), Funcional (3), Secretario (4) y Administrativo 2 (5)
+            ...(Number(userFields.nivel) === 2 || Number(userFields.nivel) === 3 || Number(userFields.nivel) === 4 || Number(userFields.nivel) === 5
                 ? { phone, identityCard }
                 : {})
         }, { transaction });

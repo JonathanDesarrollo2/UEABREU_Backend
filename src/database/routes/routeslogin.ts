@@ -56,7 +56,7 @@ RouterUser.get('/listpag',
     query('nivelFilter')
         .optional()
         .isString().withMessage('El filtro de nivel debe ser un texto')
-        .isIn(['all', '1', '2']).withMessage('El filtro de nivel debe ser: all, 1 o 2'),
+        .isIn(['all', '1', '2', '3', '4', '5']).withMessage('El filtro de nivel debe ser: all, 1, 2, 3, 4 o 5'),
     validateRoutes,
     User.getPaginatedlogin
 );
