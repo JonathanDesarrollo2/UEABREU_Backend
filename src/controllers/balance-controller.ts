@@ -585,7 +585,44 @@ export class BalanceController {
     }
   };
 
-  static manualDeposit = async (req: Request, res: Response) => {
+    /**
+   * Valida que la referencia sea obligatoria, tenga al menos 6 dígitos numéricos,
+   * y que sus últimos 6 dígitos NO coincidan con otra transacción existente.
+   *
+   * Motivo: el banco BNC valida los pagos por los últimos 6 dígitos de la
+   * referencia. Si dos pagos comparten esos 6 dígitos, el banco los trata
+   * como el mismo movimiento y se pueden duplicar registros.
+   *
+   * @returns null si todo está bien, o un mensaje de error si algo falla.
+   */
+  private static validateReferenceKey = async (
+    reference: string | undefined | null,
+    transaction: any
+  ): Promise<string | null> => {
+    if (!reference || String(reference).trim() === '') {
+      return 'La referencia del pago es obligatoria.';
+    }
+
+    const digits = String(reference).replace(/\D/g, '');
+    if (digits.length < 6) {
+      return 'La referencia debe contener al menos 6 dígitos numéricos.';
+    }
+
+    const last6 = digits.slice(-6);
+
+    const existing = await Transaction.findOne({
+      where: { reference: { [Op.iLike]: `%${last6}` } },
+      transaction,
+    });
+
+    if (existing) {
+      return `Ya existe un pago registrado con la misma clave de referencia (últimos 6 dígitos: ${last6}). Referencia en sistema: "${existing.reference}".`;
+    }
+
+    return null;
+  };
+
+    static manualDeposit = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
       const { id } = req.params;
@@ -596,16 +633,17 @@ export class BalanceController {
         return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
       }
 
+      // ✅ Referencia OBLIGATORIA y única por clave (últimos 6 dígitos)
+      const refError = await BalanceController.validateReferenceKey(reference, transaction);
+      if (refError) {
+        await transaction.rollback();
+        return res.status(409).json({ result: false, content: [], error: [refError] });
+      }
+
+      const cleanReference = String(reference).trim();
+
       const bcvRate = await BillingService.getRateForDate(String(paymentDate).slice(0, 10));
       const amountUSD = amount / bcvRate;
-
-      if (reference) {
-        const existingTransaction = await Transaction.findOne({ where: { reference }, transaction });
-        if (existingTransaction) {
-          await transaction.rollback();
-          return res.status(409).json({ result: false, content: [], error: [`La referencia "${reference}" ya fue utilizada en otra transacción.`] });
-        }
-      }
 
       const representative = await Representative.findByPk(id, {
         transaction,
@@ -652,12 +690,13 @@ export class BalanceController {
         bcvRate: bcvRate,
         description: description || 'Depósito manual',
         paymentMethod: paymentMethod || PaymentMethod.CASH,
-        reference: reference || `MANUAL-${Date.now()}`,
+        reference: cleanReference,   // ✅ sin fallback
         status: TransactionStatus.COMPLETED,
         createdBy: validCreatedBy,
         balanceBefore: totalBeforeUSD,
         balanceAfter: newTotalBalanceUSD,
         transactionDate: new Date(),
+        paymentTime,
       }, { transaction });
 
       await transaction.commit();
@@ -680,7 +719,7 @@ export class BalanceController {
     }
   };
 
-  static manualWithdrawal = async (req: Request, res: Response) => {
+    static manualWithdrawal = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();
     try {
       const { id } = req.params;
@@ -690,6 +729,15 @@ export class BalanceController {
         await transaction.rollback();
         return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
       }
+
+      // ✅ Referencia OBLIGATORIA y única por clave (últimos 6 dígitos)
+      const refError = await BalanceController.validateReferenceKey(reference, transaction);
+      if (refError) {
+        await transaction.rollback();
+        return res.status(409).json({ result: false, content: [], error: [refError] });
+      }
+
+      const cleanReference = String(reference).trim();
 
       // Tasa registrada para la fecha del pago (igual que en manualDeposit)
       const bcvRate = await BillingService.getRateForDate(String(paymentDate).slice(0, 10));
@@ -751,13 +799,13 @@ export class BalanceController {
         bcvRate: bcvRate,
         description: description || 'Retiro manual',
         paymentMethod: paymentMethod || PaymentMethod.CASH,
-        reference: reference || `MANUAL-${Date.now()}`,
+        reference: cleanReference,   // ✅ sin fallback
         status: TransactionStatus.COMPLETED,
         createdBy: validCreatedBy,
         balanceBefore: totalBalanceUSD,
-         balanceAfter: newTotalBalanceUSD,
-         transactionDate: new Date(),
-         paymentTime
+        balanceAfter: newTotalBalanceUSD,
+        transactionDate: new Date(),
+        paymentTime
       }, { transaction });
 
       await transaction.commit();

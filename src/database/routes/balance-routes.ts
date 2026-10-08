@@ -7,6 +7,7 @@ import { authsession } from "../../utility/authsession";
 import { PaymentMethod, TransactionType, TransactionStatus } from "../../database/models/transaction";
 import { User } from "../../controllers/UserController";
 import { TransactionDeleteController } from "../../controllers/transaction-delete-controller";
+import { TransactionReferenceGuardController } from "../../controllers/transaction-reference-guard-controller";
 
 const router = Router();
 
@@ -119,6 +120,14 @@ router.get('/check-payment',
   BalanceController.checkPaymentExists
 );
 
+// 🆕 NUEVO: verifica duplicado por los ÚLTIMOS 6 DÍGITOS de la referencia
+router.get('/check-reference-key',
+  authsession,
+  query('reference').notEmpty().withMessage('La referencia es requerida'),
+  validateRoutes,
+  TransactionReferenceGuardController.checkReferenceKey
+);
+
 router.get('/statistics',
   authsession,
   User.getUserStatistics
@@ -191,9 +200,7 @@ router.post('/transaction/move',
   BalanceController.movePaymentBetweenStudents
 );
 
-// ========== ELIMINAR TRANSACCIÓN (SOLO ADMIN NIVEL 1) ==========
-// Elimina un pago/mensualidad/inscripción/ajuste y revierte el saldo del
-// estudiante. Requiere contraseña del propio admin nivel 1 logueado.
+// ========== ELIMINAR TRANSACCIÓN (SOLO ADMIN NIVEL 2) ==========
 router.post('/transaction/:transactionId/delete',
   authsession,
   param('transactionId').isUUID().withMessage('ID de transacción inválido'),
