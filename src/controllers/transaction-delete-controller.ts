@@ -11,8 +11,12 @@ import { getErrorLocation } from '../utility/callerinfo';
 export class TransactionDeleteController {
   /**
    * Elimina una transacción (pago/mensualidad/inscripción/etc.) y revierte
-   * el saldo del estudiante. Solo el usuario con `nivel === 1` puede ejecutarlo,
-   * y debe confirmar con SU contraseña.
+   * el saldo del estudiante. Solo el usuario con `nivel === 2` (administrador
+   * principal) puede ejecutarlo, y debe confirmar con SU contraseña.
+   *
+   * Nota de roles:
+   *   - nivel 1 = representante
+   *   - nivel 2 = administrador principal  ← único autorizado a eliminar
    */
   static deleteTransaction = async (req: Request, res: Response) => {
     const t = await sequelize.transaction();
@@ -33,13 +37,13 @@ export class TransactionDeleteController {
         return res.status(404).json({ result: false, content: [], error: ['Usuario no encontrado'] });
       }
 
-      // 2. Nivel 1 (máximo) únicamente
-      if (admin.nivel !== 1) {
+      // 2. SOLO admin de nivel 2 (administrador principal)
+      if (admin.nivel !== 2) {
         await t.rollback();
         return res.status(403).json({
           result: false,
           content: [],
-          error: ['Solo el administrador de nivel 1 puede eliminar pagos'],
+          error: ['Solo el administrador principal (nivel 2) puede eliminar pagos'],
         });
       }
 
