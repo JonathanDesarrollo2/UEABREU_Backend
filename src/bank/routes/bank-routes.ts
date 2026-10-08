@@ -1,4 +1,3 @@
-// src/bank/routes/bank-routes.ts
 import { Router } from 'express';
 import { BankController } from '../controllers/bank-controller';
 import { body } from 'express-validator';
@@ -57,26 +56,32 @@ router.post('/validate-reference',
   bankController.validateReference
 );
 
-router.post('/validate-existence',
-  [
-    body('AccountNumber').notEmpty().isString(),
-    body('BankCode').isInt({ min: 1 }),
-    body('PhoneNumber').notEmpty().isString(),
-    body('ClientID').notEmpty().isString(),
-    body('RequestDate').notEmpty().isString(),
-    body('Amount').isNumeric()
-  ],
-  validateRoutes,
-  bankController.validateExistence
-);
+// 🚫 DESHABILITADO A PROPÓSITO:
+// Esta validación NO usa la referencia como input → permitía registrar
+// duplicados cambiando la referencia. Se deja el método del controller
+// disponible por si se necesita como herramienta administrativa interna,
+// pero NO se expone como ruta pública.
+//
+// router.post('/validate-existence',
+//   [
+//     body('AccountNumber').notEmpty().isString(),
+//     body('BankCode').isInt({ min: 1 }),
+//     body('PhoneNumber').notEmpty().isString(),
+//     body('ClientID').notEmpty().isString(),
+//     body('RequestDate').notEmpty().isString(),
+//     body('Amount').isNumeric()
+//   ],
+//   validateRoutes,
+//   bankController.validateExistence
+// );
 
-// NUEVA RUTA: Tasa BCV del día
+// Tasa BCV del día
 router.get('/bcv-rate', bankController.getBCVRate);
 
-// NUEVA RUTA: Lista de bancos disponibles
+// Lista de bancos disponibles
 router.get('/banks', bankController.getBanksList);
 
-// Ruta para obtener información completa del estado del banco
+// Estado completo del banco
 router.get('/full-status', bankController.getBankFullStatus);
 
 export default router;

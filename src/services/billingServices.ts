@@ -188,21 +188,22 @@ export class BillingService {
         const currentYear = today.getFullYear();
         const currentMonth = today.getMonth();
 
-                // ── Septiembre 2026: NADA ────────────────────────────────
+        // ── Septiembre 2026: NADA ────────────────────────────────
         if (currentYear === 2026 && currentMonth === 8) {
           await student.update({ balance: currentBalanceUSD }, { transaction: t });
           if (!externalTransaction) await t.commit();
           return;
         }
 
-        // ── Primera semana de octubre 2026: SOLO mensualidad de octubre ──
+        // ── Primeros 10 días de octubre 2026: SOLO mensualidad de octubre ──
         // Ventana especial por retraso en el pase a producción: durante
-        // los primeros 7 días de octubre 2026 solo se cobra la mensualidad
+        // los primeros 10 días de octubre 2026 solo se cobra la mensualidad
         // de octubre. Se omite inscripción, gasto administrativo, agosto
         // 2027 y cualquier mensualidad retroactiva (ej. septiembre).
-        // A partir del día 8, se retoma el flujo normal sin cambios.
+        // A partir del día 11, se retoma el flujo normal sin cambios.
+        // Coincide con el último día de pronto pago (prontoPagoDeadlineDay = 10).
         const isFirstWeekOfOctober2026 =
-          currentYear === 2026 && currentMonth === 9 && today.getDate() <= 7;
+          currentYear === 2026 && currentMonth === 9 && today.getDate() <= 10;
 
         if (isFirstWeekOfOctober2026) {
           const descOct = `Mensualidad ${monthNames[9]} 2026`;
@@ -245,7 +246,6 @@ export class BillingService {
           if (!externalTransaction) await t.commit();
           return;
         }
-
 
         // ¿Es diciembre 2026 o posterior? → cobrar 100% agosto 2027
         const isDecOrLater = (currentYear === 2026 && currentMonth >= 11) || currentYear > 2026;
@@ -669,7 +669,7 @@ export class BillingService {
     }, { transaction });
   }
 
-    // 🔒 Mutex para evitar doble ejecución
+  // 🔒 Mutex para evitar doble ejecución
   private static applyMonthlyFeeRunning = false;
 
   static async applyMonthlyFee() {
@@ -792,6 +792,7 @@ export class BillingService {
         }
 
         // 3. Recargo por pronto pago vencido
+        //    Regla: si hoy > deadlineDay (ej: 10), o sea desde el 11, se aplica el recargo.
         const newBalanceUSD = currentBalanceUSD;
         if (today.getDate() > deadlineDay && newBalanceUSD < 0) {
           const descRecargo = `Recargo por pronto pago vencido ${monthNames[month]} ${year}`;

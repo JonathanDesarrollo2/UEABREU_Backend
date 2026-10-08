@@ -6,6 +6,7 @@ import { BalanceController } from "../../controllers/balance-controller";
 import { authsession } from "../../utility/authsession";
 import { PaymentMethod, TransactionType, TransactionStatus } from "../../database/models/transaction";
 import { User } from "../../controllers/UserController";
+import { TransactionDeleteController } from "../../controllers/transaction-delete-controller";
 
 const router = Router();
 
@@ -13,8 +14,6 @@ const router = Router();
 router.get('/representatives',
   authsession,
   query('page').optional().isInt({ min: 1 }).toInt(),
-  // El dashboard admin solicita limit=1000 para calcular la distribución
-  // completa de estados de pago; con max:100 la validación lo rechazaba.
   query('limit').optional().isInt({ min: 1, max: 1000 }).toInt(),
   query('fullName').optional().isString(),
   query('identityCard').optional().isString(),
@@ -97,7 +96,6 @@ router.post('/representative/:id/withdraw',
   body('description').optional().isString().isLength({ max: 500 }),
   body('paymentMethod').optional().isIn(Object.values(PaymentMethod)),
   body('reference').optional().isString(),
-  // 🔧 FIX Tarea 2: la fecha del pago es obligatoria (se usa para la tasa histórica)
   body('paymentDate').notEmpty().isISO8601().withMessage('La fecha del pago es obligatoria'),
   body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   validateRoutes,
@@ -193,12 +191,15 @@ router.post('/transaction/move',
   BalanceController.movePaymentBetweenStudents
 );
 
-router.post('/transaction/move',
+// ========== ELIMINAR TRANSACCIÓN (SOLO ADMIN NIVEL 1) ==========
+// Elimina un pago/mensualidad/inscripción/ajuste y revierte el saldo del
+// estudiante. Requiere contraseña del propio admin nivel 1 logueado.
+router.post('/transaction/:transactionId/delete',
   authsession,
-  body('transactionId').isUUID().withMessage('ID de transacción inválido'),
-  body('targetStudentId').isUUID().withMessage('ID de estudiante destino inválido'),
+  param('transactionId').isUUID().withMessage('ID de transacción inválido'),
+  body('password').notEmpty().withMessage('Contraseña requerida'),
   validateRoutes,
-  BalanceController.movePaymentBetweenStudents
+  TransactionDeleteController.deleteTransaction
 );
 
 // ========== RANKING DE ESTUDIANTES ==========
@@ -213,7 +214,7 @@ router.get('/students-ranking',
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
   query('sortOrder').optional().isIn(['asc', 'desc']),
   validateRoutes,
-  BalanceController.getStudentsRanking 
+  BalanceController.getStudentsRanking
 );
 
 export default router;
