@@ -8,7 +8,6 @@ import { PaymentMethod, TransactionType, TransactionStatus } from "../../databas
 import { User } from "../../controllers/UserController";
 import { TransactionDeleteController } from "../../controllers/transaction-delete-controller";
 import { TransactionReferenceGuardController } from "../../controllers/transaction-reference-guard-controller";
-import { AdminBackfillController } from "../../controllers/admin-backfill-controller";
 const router = Router();
 
 // ========== REPRESENTANTES CON FILTROS ==========
@@ -223,15 +222,5 @@ router.get('/students-ranking',
   validateRoutes,
   BalanceController.getStudentsRanking
 );
-// ========== BACKFILL: mensualidad del mes en curso (solo admin nivel 2) ==========
-// Corrige estudiantes activados que no pasaron por BillingService.
-// Ejecutar primero en 'preview' para revisar la lista, luego en 'apply'.
-router.post('/admin/backfill-current-month-fee',
-  authsession,
-  body('mode').isIn(['preview', 'apply']).withMessage('mode debe ser "preview" o "apply"'),
-  body('password').notEmpty().withMessage('Contraseña requerida'),
-  body('studentIds').optional().isArray().withMessage('studentIds debe ser un array'),
-  validateRoutes,
-  AdminBackfillController.backfillCurrentMonthFee
-);
+
 export default router;
