@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { body, param, query } from "express-validator"; 
 import { validateRoutes } from "../../middleware/validateRoutes";
-import { User } from "../../controllers/UserController"; // Ajusta la ruta según tu estructura
+import { User } from "../../controllers/UserController";
 import { loginLimiter } from "../../utility/loginLimiter";
 import { authsession } from "../../utility/authsession";
 import { AdminPasswordController } from "../../controllers/AdminPasswordController";
@@ -166,6 +166,9 @@ RouterUser.get('/students/list',
     query('limit').optional().isNumeric().toInt(),
     query('status').optional().isString(),
     query('search').optional().isString(),
+    // 🆕 Nuevas validaciones
+    query('grade').optional().isString(),
+    query('section').optional().isString(),
     validateRoutes,
     User.listStudents
 );
@@ -191,7 +194,7 @@ RouterUser.put('/students/:id/section',
     .notEmpty().withMessage('La sección es requerida')
     .isString().isLength({ min: 1, max: 10 }).withMessage('Sección inválida (máx. 10 caracteres)'),
   validateRoutes,
-  User.updateSection   // ← este método debes haberlo añadido antes en UserController
+  User.updateSection
 );
 
 RouterUser.post('/impersonate/:id',

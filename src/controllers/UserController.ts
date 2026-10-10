@@ -1171,13 +1171,23 @@ static adduser = async (req: Request, res: Response) => {
     //#region: Obtener lista de estudiantes (para dashboard)
     static listStudents = async (req: Request, res: Response) => {
   try {
-    const { page = 1, limit = 100, status, search } = req.query;
+    const { page = 1, limit = 100, status, search, grade, section } = req.query;   // 🆕 grade, section
     const offset = (Number(page) - 1) * Number(limit);
 
     const where: any = {};
 
     if (status) {
       where.status = status;
+    }
+
+    // 🆕 Filtro por año
+    if (grade && typeof grade === 'string' && grade.trim() !== '' && grade !== 'all') {
+      where.currentGrade = grade;
+    }
+
+    // 🆕 Filtro por sección
+    if (section && typeof section === 'string' && section.trim() !== '' && section !== 'all') {
+      where.section = section;
     }
 
     if (search && typeof search === 'string') {
@@ -1199,7 +1209,7 @@ static adduser = async (req: Request, res: Response) => {
       attributes: [
             'id', 'fullName', 'identityCard', 'birthDate', 'status',
             'currentGrade', 'section', 'createdAt', 'balance',
-            'exonerationPercent', 'admissionDate', 'representativeId', 'userId' // ✅ Añadido
+            'exonerationPercent', 'admissionDate', 'representativeId', 'userId'
       ],
       include: [{
         model: Representative,
