@@ -672,6 +672,130 @@ export class BillingService {
   // 🔒 Mutex para evitar doble ejecución
   private static applyMonthlyFeeRunning = false;
 
+    /**
+   * Asegura que el estudiante tenga la mensualidad del MES EN CURSO.
+   * - Idempotente: si ya existe, no hace nada.
+   * - Solo aplica a estudiantes activos con grado y sección asignados.
+   * - No toca inscripción, admin, agosto 2027, ni meses pasados.
+   * - No aplica en septiembre 2026 (regla del cron).
+   * - Si ya se pagó (ya existe la FEE del mes), no hace nada.
+   *
+   * Se usa desde:
+   *  - activación de un estudiante desde `updatelogin`
+   *  - endpoint administrativo de backfill
+   */
+  public static async ensureCurrentMonthFee(
+    studentId: string,
+    representativeId: string,
+    externalTransaction?: any
+  ): Promise<{ applied: boolean; reason?: string; amountUSD?: number }> {
+    const t = externalTransaction || await sequelize.transaction();
+    try {
+      const student = await Student.findByPk(studentId, { transaction: t });
+      if (!student) {
+        if (!externalTransaction) await t.rollback();
+        return { applied: false, reason: 'student_not_found' };
+      }
+
+      // Solo activos
+      const ACTIVE = ['regular', 'repitiente', 'condicionado'];
+      if (!student.status || !ACTIVE.includes(student.status)) {
+        if (!externalTransaction) await t.commit();
+        return { applied: false, reason: 'status_not_active' };
+      }
+
+      // Debe tener grado y sección asignados
+      const gradeOk = !!student.currentGrade && student.currentGrade.trim() !== '' && student.currentGrade !== 'En asignar';
+      const sectionOk = !!student.section && student.section.trim() !== '' && student.section !== 'Pendiente';
+      if (!gradeOk || !sectionOk) {
+        if (!externalTransaction) await t.commit();
+        return { applied: false, reason: 'no_grade_or_section' };
+      }
+
+      const today = await getCurrentDate();
+      const year = today.getFullYear();
+      const month = today.getMonth();
+
+      // Septiembre 2026: nada (misma regla del cron)
+      if (year === 2026 && month === 8) {
+        if (!externalTransaction) await t.commit();
+        return { applied: false, reason: 'september_2026_skip' };
+      }
+
+      const monthNames = [
+        'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+      ];
+      const desc = `Mensualidad ${monthNames[month]} ${year}`;
+
+      // ¿Ya existe la FEE del mes?
+      const existing = await Transaction.findOne({
+        where: {
+          studentId: student.id,
+          type: TransactionType.FEE,
+          description: desc,
+          createdAt: {
+            [Op.gte]: new Date(year, month, 1),
+            [Op.lt]: new Date(year, month + 1, 1),
+          },
+        },
+        transaction: t,
+      });
+
+      if (existing) {
+        if (!externalTransaction) await t.commit();
+        return { applied: false, reason: 'already_exists' };
+      }
+
+      // Tasa: usamos la del día 1 del mes en curso (como haría el cron).
+      // Si no existe, caemos a la tasa del día actual.
+      const firstDayOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      let bcvRate: number;
+      try {
+        bcvRate = await this.getRateForDate(firstDayOfMonth);
+      } catch {
+        bcvRate = await this.getCurrentBCVRate();
+      }
+
+      const fees = await this.getSchoolFees();
+      const exoneration = student.exonerationPercent || 0;
+      let monthlyUSD = fees.monthlyFeeUSD! * (1 - exoneration / 100);
+      monthlyUSD = Math.round(monthlyUSD * 100) / 100;
+      if (monthlyUSD <= 0) {
+        if (!externalTransaction) await t.commit();
+        return { applied: false, reason: 'amount_zero_after_exoneration' };
+      }
+      const monthlyBS = Math.round(monthlyUSD * bcvRate * 100) / 100;
+
+      const currentBalanceUSD = student.balance || 0;
+
+      await Transaction.create({
+        studentId: student.id,
+        representativeId,
+        type: TransactionType.FEE,
+        amount: monthlyBS,
+        amountUSD: monthlyUSD,
+        bcvRate,
+        description: desc,
+        paymentMethod: PaymentMethod.CASH,
+        status: TransactionStatus.COMPLETED,
+        balanceBefore: currentBalanceUSD,
+        balanceAfter: Math.round((currentBalanceUSD - monthlyUSD) * 100) / 100,
+      }, { transaction: t });
+
+      await student.update(
+        { balance: Math.round((currentBalanceUSD - monthlyUSD) * 100) / 100 },
+        { transaction: t }
+      );
+
+      if (!externalTransaction) await t.commit();
+      return { applied: true, amountUSD: monthlyUSD };
+    } catch (error) {
+      if (!externalTransaction) await t.rollback();
+      throw error;
+    }
+  }
+
   static async applyMonthlyFee() {
     if (BillingService.applyMonthlyFeeRunning) {
       console.log('⏳ applyMonthlyFee ya está en ejecución, se omite esta llamada');
