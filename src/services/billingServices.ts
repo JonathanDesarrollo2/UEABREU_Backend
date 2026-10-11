@@ -196,12 +196,6 @@ export class BillingService {
         }
 
         // ── Primeros 10 días de octubre 2026: SOLO mensualidad de octubre ──
-        // Ventana especial por retraso en el pase a producción: durante
-        // los primeros 10 días de octubre 2026 solo se cobra la mensualidad
-        // de octubre. Se omite inscripción, gasto administrativo, agosto
-        // 2027 y cualquier mensualidad retroactiva (ej. septiembre).
-        // A partir del día 11, se retoma el flujo normal sin cambios.
-        // Coincide con el último día de pronto pago (prontoPagoDeadlineDay = 10).
         const isFirstWeekOfOctober2026 =
           currentYear === 2026 && currentMonth === 9 && today.getDate() <= 10;
 
@@ -331,8 +325,6 @@ export class BillingService {
         }
 
         // ── 2. MENSUALIDADES ──────────────────────────────────────
-        // Regular: desde Sept 2026 hasta el mes en curso.
-        // Nuevo:   solo el mes en curso.
         const startDate = isNewStudent
           ? new Date(currentYear, currentMonth, 1)
           : new Date(2026, 8, 1);
@@ -672,17 +664,9 @@ export class BillingService {
   // 🔒 Mutex para evitar doble ejecución
   private static applyMonthlyFeeRunning = false;
 
-    /**
+  /**
    * Asegura que el estudiante tenga la mensualidad del MES EN CURSO.
-   * - Idempotente: si ya existe, no hace nada.
-   * - Solo aplica a estudiantes activos con grado y sección asignados.
-   * - No toca inscripción, admin, agosto 2027, ni meses pasados.
-   * - No aplica en septiembre 2026 (regla del cron).
-   * - Si ya se pagó (ya existe la FEE del mes), no hace nada.
-   *
-   * Se usa desde:
-   *  - activación de un estudiante desde `updatelogin`
-   *  - endpoint administrativo de backfill
+   * Idempotente: si ya existe, no hace nada.
    */
   public static async ensureCurrentMonthFee(
     studentId: string,
@@ -697,14 +681,12 @@ export class BillingService {
         return { applied: false, reason: 'student_not_found' };
       }
 
-      // Solo activos
       const ACTIVE = ['regular', 'repitiente', 'condicionado'];
       if (!student.status || !ACTIVE.includes(student.status)) {
         if (!externalTransaction) await t.commit();
         return { applied: false, reason: 'status_not_active' };
       }
 
-      // Debe tener grado y sección asignados
       const gradeOk = !!student.currentGrade && student.currentGrade.trim() !== '' && student.currentGrade !== 'En asignar';
       const sectionOk = !!student.section && student.section.trim() !== '' && student.section !== 'Pendiente';
       if (!gradeOk || !sectionOk) {
@@ -716,7 +698,6 @@ export class BillingService {
       const year = today.getFullYear();
       const month = today.getMonth();
 
-      // Septiembre 2026: nada (misma regla del cron)
       if (year === 2026 && month === 8) {
         if (!externalTransaction) await t.commit();
         return { applied: false, reason: 'september_2026_skip' };
@@ -728,7 +709,6 @@ export class BillingService {
       ];
       const desc = `Mensualidad ${monthNames[month]} ${year}`;
 
-      // ¿Ya existe la FEE del mes?
       const existing = await Transaction.findOne({
         where: {
           studentId: student.id,
@@ -747,8 +727,6 @@ export class BillingService {
         return { applied: false, reason: 'already_exists' };
       }
 
-      // Tasa: usamos la del día 1 del mes en curso (como haría el cron).
-      // Si no existe, caemos a la tasa del día actual.
       const firstDayOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-01`;
       let bcvRate: number;
       try {
@@ -817,7 +795,6 @@ export class BillingService {
       ];
 
       const bcvRate = await this.getCurrentBCVRate();
-      const deadlineDay = fees.prontoPagoDeadlineDay || 10;
 
       // Septiembre 2026: no aplicar nada
       if (year === 2026 && month === 8) return;
@@ -914,51 +891,105 @@ export class BillingService {
             }
           }
         }
-
-        // 3. Recargo por pronto pago vencido
-        //    Regla: si hoy > deadlineDay (ej: 10), o sea desde el 11, se aplica el recargo.
-        const newBalanceUSD = currentBalanceUSD;
-        if (today.getDate() > deadlineDay && newBalanceUSD < 0) {
-          const descRecargo = `Recargo por pronto pago vencido ${monthNames[month]} ${year}`;
-          const existingRecargo = await Transaction.findOne({
-            where: {
-              studentId: student.id,
-              type: TransactionType.FEE,
-              description: descRecargo,
-              createdAt: {
-                [Op.gte]: new Date(year, month, 1),
-                [Op.lt]: new Date(year, month + 1, 1)
-              }
-            }
-          });
-
-          if (!existingRecargo) {
-            const recargoUSD = fees.prontoPagoDiscount || 0;
-            const recargoBS = Math.round(recargoUSD * bcvRate * 100) / 100;
-
-            if (recargoUSD > 0) {
-              await Transaction.create({
-                studentId: student.id,
-                representativeId: student.representativeId!,
-                type: TransactionType.FEE,
-                amount: recargoBS,
-                amountUSD: recargoUSD,
-                bcvRate,
-                description: descRecargo,
-                paymentMethod: PaymentMethod.CASH,
-                status: TransactionStatus.COMPLETED,
-                balanceBefore: newBalanceUSD,
-                balanceAfter: newBalanceUSD - recargoUSD,
-              });
-
-              await student.update({ balance: newBalanceUSD - recargoUSD });
-            }
-          }
-        }
       }
     } finally {
       BillingService.applyMonthlyFeeRunning = false;
     }
+  }
+
+  /**
+   * Aplica el recargo por pronto pago vencido a todos los estudiantes
+   * con deuda que aún no lo tengan este mes.
+   *
+   * - Se ejecuta todos los días a las 00:05.
+   * - Solo actúa a partir del día siguiente al deadline (ej: día 11).
+   * - Idempotente: los que ya tienen el recargo del mes se saltan.
+   * - Se puede forzar la ejecución con `force=true` para correcciones puntuales.
+   */
+  static async applyProntoPagoRecargo(force: boolean = false) {
+    const today = await getCurrentDate();
+    const fees = await this.getSchoolFees();
+    const deadlineDay = fees.prontoPagoDeadlineDay || 10;
+
+    // Solo se ejecuta a partir del día siguiente al deadline.
+    // Si force=true, ignora esta verificación.
+    if (!force && today.getDate() <= deadlineDay) return;
+
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const monthNames = [
+      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ];
+
+    // Septiembre 2026: no aplica
+    if (year === 2026 && month === 8) return;
+
+    const recargoUSD = fees.prontoPagoDiscount || 0;
+    if (recargoUSD <= 0) return;
+
+    const bcvRate = await this.getCurrentBCVRate();
+    const recargoBS = Math.round(recargoUSD * bcvRate * 100) / 100;
+    const descRecargo = `Recargo por pronto pago vencido ${monthNames[month]} ${year}`;
+
+    const students = await Student.findAll({
+      where: {
+        status: { [Op.in]: ['regular', 'repitiente', 'condicionado'] }
+      }
+    });
+
+    let applied = 0;
+    let skipped = 0;
+
+    for (const student of students) {
+      const currentBalanceUSD = student.balance || 0;
+
+      // Solo a deudores
+      if (currentBalanceUSD >= 0) continue;
+
+      // ¿Ya tiene el recargo este mes? → saltar (idempotencia)
+      const existingRecargo = await Transaction.findOne({
+        where: {
+          studentId: student.id,
+          type: TransactionType.FEE,
+          description: descRecargo,
+          createdAt: {
+            [Op.gte]: new Date(year, month, 1),
+            [Op.lt]: new Date(year, month + 1, 1)
+          }
+        }
+      });
+
+      if (existingRecargo) {
+        skipped++;
+        continue;
+      }
+
+      await Transaction.create({
+        studentId: student.id,
+        representativeId: student.representativeId!,
+        type: TransactionType.FEE,
+        amount: recargoBS,
+        amountUSD: recargoUSD,
+        bcvRate,
+        description: descRecargo,
+        paymentMethod: PaymentMethod.CASH,
+        status: TransactionStatus.COMPLETED,
+        balanceBefore: currentBalanceUSD,
+        balanceAfter: Math.round((currentBalanceUSD - recargoUSD) * 100) / 100,
+      });
+
+      await student.update({
+        balance: Math.round((currentBalanceUSD - recargoUSD) * 100) / 100
+      });
+
+      applied++;
+    }
+
+    console.log(
+      `✅ [pronto-pago] Recargo ${monthNames[month]} ${year}: ` +
+      `aplicado a ${applied} estudiantes, ${skipped} ya lo tenían.`
+    );
   }
 
   static async applyInscriptionFees(
