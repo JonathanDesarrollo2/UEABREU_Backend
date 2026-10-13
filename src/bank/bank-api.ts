@@ -257,6 +257,14 @@ export class BankAPI {
     }
   }
 
+  /**
+   * Validación en cascada con DOS validaciones del banco:
+   *   1. Validate (con referencia + monto + fecha)
+   *   2. ValidateExistence (sin referencia + teléfono + banco + monto + fecha)
+   *
+   * Ambas deben encontrar el movimiento para considerar el pago verificado.
+   * Si una falla o no encuentra → manual_review.
+   */
   async cascadedValidation(validationData: any): Promise<CascadedValidationResult> {
     const SCHOOL_CLIENT_ID = 'J505275356';
     const SCHOOL_ACCOUNT = '01910107012100104749';
@@ -267,7 +275,6 @@ export class BankAPI {
       details: {
         validateP2P: { executed: false, success: false, movementExists: false },
         validateReference: { executed: false, success: false, movementExists: false },
-        // Se mantiene por compatibilidad con el tipo, pero NUNCA se ejecuta.
         validateExistence: { executed: false, success: false, movementExists: false },
       },
       timestamp: new Date().toISOString(),
@@ -276,10 +283,14 @@ export class BankAPI {
     try {
       const pad = (n: number) => n.toString().padStart(2, '0');
 
-      // ✅ Referencia OBLIGATORIA
       if (!validationData.Reference || String(validationData.Reference).trim() === '') {
         result.overallResult = 'error';
-        result.message = 'La referencia es obligatoria para validar el pago.';
+        result.message = 'La referencia es obligatoria.';
+        return result;
+      }
+      if (!validationData.PhoneNumber || String(validationData.PhoneNumber).trim() === '') {
+        result.overallResult = 'error';
+        result.message = 'El teléfono del pagador es obligatorio.';
         return result;
       }
 
@@ -290,7 +301,6 @@ export class BankAPI {
       } else {
         movementDate = new Date();
       }
-
       const formattedDate = `${movementDate.getFullYear()}/${pad(movementDate.getMonth() + 1)}/${pad(movementDate.getDate())}T${pad(movementDate.getHours())}:${pad(movementDate.getMinutes())}:${pad(movementDate.getSeconds())}`;
 
       if (!this.workingKey) await this.authenticate();
@@ -298,35 +308,7 @@ export class BankAPI {
       const childClientID = validationData.ChildClientID?.trim() ? validationData.ChildClientID : undefined;
       const branchID = validationData.BranchID?.trim() ? validationData.BranchID : undefined;
 
-      // 1. P2P (usa Reference)
-      try {
-        const p2pPayload: any = {
-          AccountNumber: SCHOOL_ACCOUNT,
-          BankCode: validationData.BankCode,
-          PhoneNumber: validationData.PhoneNumber,
-          ClientID: SCHOOL_CLIENT_ID,
-          Reference: String(validationData.Reference),
-          RequestDate: formattedDate,
-          Amount: Number(validationData.Amount),
-        };
-        if (childClientID) p2pPayload.ChildClientID = childClientID;
-        if (branchID) p2pPayload.BranchID = branchID;
-
-        console.log('🔍 [BNC] P2P payload:', JSON.stringify(p2pPayload));
-
-        const p2pResult = await this.sendRequest<ValidationResponse>('/Position/ValidateP2P', p2pPayload);
-        result.details.validateP2P = { executed: true, success: true, movementExists: p2pResult.MovementExists, data: p2pResult };
-        if (p2pResult.MovementExists) {
-          result.overallResult = 'success';
-          result.message = 'Pago verificado exitosamente mediante validación P2P';
-          return result;
-        }
-      } catch (error: any) {
-        console.error(`🚨 [BNC] P2P falló:`, error.message);
-        result.details.validateP2P = { executed: true, success: false, movementExists: false, error: error.message };
-      }
-
-      // 2. Referencia (usa Reference)
+      // ── 1. Validate (con referencia) ──
       try {
         const refPayload: any = {
           ClientID: SCHOOL_CLIENT_ID,
@@ -338,26 +320,75 @@ export class BankAPI {
         if (childClientID) refPayload.ChildClientID = childClientID;
         if (branchID) refPayload.BranchID = branchID;
 
-        console.log('🔍 [BNC] Reference payload:', JSON.stringify(refPayload));
+        console.log('🔍 [BNC] Validate payload:', JSON.stringify(refPayload));
 
         const refResult = await this.sendRequest<ValidationResponse>('/Position/Validate', refPayload);
-        result.details.validateReference = { executed: true, success: true, movementExists: refResult.MovementExists, data: refResult };
-        if (refResult.MovementExists) {
-          result.overallResult = 'success';
-          result.message = 'Pago verificado exitosamente mediante validación con referencia';
-          return result;
-        }
+        result.details.validateReference = {
+          executed: true,
+          success: true,
+          movementExists: refResult.MovementExists,
+          data: refResult,
+        };
       } catch (error: any) {
-        console.error(`🚨 [BNC] Reference falló:`, error.message);
-        result.details.validateReference = { executed: true, success: false, movementExists: false, error: error.message };
+        console.error(`🚨 [BNC] Validate falló:`, error.message);
+        result.details.validateReference = {
+          executed: true,
+          success: false,
+          movementExists: false,
+          error: error.message,
+        };
       }
 
-      // 3. 🚫 ValidateExistence DESHABILITADO a propósito.
-      //    No usa la referencia como input → permitía registrar el mismo pago
-      //    cambiando la referencia. Solo validamos con métodos que exigen referencia.
+      // ── 2. ValidateExistence (sin referencia) ──
+      try {
+        const existencePayload: any = {
+          AccountNumber: SCHOOL_ACCOUNT,
+          BankCode: validationData.BankCode,
+          PhoneNumber: validationData.PhoneNumber,
+          ClientID: SCHOOL_CLIENT_ID,
+          RequestDate: formattedDate,
+          Amount: Number(validationData.Amount),
+        };
+        if (childClientID) existencePayload.ChildClientID = childClientID;
+        if (branchID) existencePayload.BranchID = branchID;
 
-      result.overallResult = 'manual_review';
-      result.message = 'No se encontró el movimiento con la referencia suministrada. Verifique los datos o contacte al administrador.';
+        console.log('🔍 [BNC] ValidateExistence payload:', JSON.stringify(existencePayload));
+
+        const existenceResult = await this.sendRequest<ValidationResponse>('/Position/ValidateExistence', existencePayload);
+        result.details.validateExistence = {
+          executed: true,
+          success: true,
+          movementExists: existenceResult.MovementExists,
+          data: existenceResult,
+        };
+      } catch (error: any) {
+        console.error(`🚨 [BNC] ValidateExistence falló:`, error.message);
+        result.details.validateExistence = {
+          executed: true,
+          success: false,
+          movementExists: false,
+          error: error.message,
+        };
+      }
+
+      // ── Decisión final: AMBAS deben encontrar ──
+      const refOk = result.details.validateReference.movementExists;
+      const existOk = result.details.validateExistence.movementExists;
+
+      if (refOk && existOk) {
+        result.overallResult = 'success';
+        result.message = 'Pago verificado exitosamente por referencia y por existencia.';
+      } else if (refOk || existOk) {
+        result.overallResult = 'manual_review';
+        const missing: string[] = [];
+        if (!refOk) missing.push('Referencia');
+        if (!existOk) missing.push('Existencia');
+        result.message = `El pago apareció en algunas validaciones pero no en: ${missing.join(', ')}. Verificación manual requerida.`;
+      } else {
+        result.overallResult = 'manual_review';
+        result.message = 'No se encontró el movimiento en ninguna validación. Verifique los datos o contacte al administrador.';
+      }
+
       return result;
     } catch (error: any) {
       result.overallResult = 'error';
