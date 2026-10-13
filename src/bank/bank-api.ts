@@ -378,12 +378,14 @@ export class BankAPI {
       if (refOk && existOk) {
         result.overallResult = 'success';
         result.message = 'Pago verificado exitosamente por referencia y por existencia.';
-      } else if (refOk || existOk) {
+      } else if (refOk && !existOk) {
+        // Muy probablemente el pago NO es P2P (es PMPC, C2P, transferencia, etc.)
+        // y ValidateExistence solo cubre P2P. Se reporta para revisión manual.
         result.overallResult = 'manual_review';
-        const missing: string[] = [];
-        if (!refOk) missing.push('Referencia');
-        if (!existOk) missing.push('Existencia');
-        result.message = `El pago apareció en algunas validaciones pero no en: ${missing.join(', ')}. Verificación manual requerida.`;
+        result.message = 'El pago se encontró por referencia, pero el banco no lo reconoce como P2P (ValidateExistence). Probablemente sea un pago PMPC/C2P/transferencia, que requiere verificación manual.';
+      } else if (!refOk && existOk) {
+        result.overallResult = 'manual_review';
+        result.message = 'El pago se encontró por teléfono/banco, pero la referencia no coincidió. Verificación manual requerida.';
       } else {
         result.overallResult = 'manual_review';
         result.message = 'No se encontró el movimiento en ninguna validación. Verifique los datos o contacte al administrador.';
