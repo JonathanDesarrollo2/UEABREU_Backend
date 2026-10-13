@@ -258,12 +258,16 @@ export class BankAPI {
   }
 
   /**
-   * Validación en cascada con DOS validaciones del banco:
-   *   1. Validate (con referencia + monto + fecha)
-   *   2. ValidateExistence (sin referencia + teléfono + banco + monto + fecha)
+   * Validación por REFERENCIA ÚNICAMENTE.
+   * Llama al endpoint /Position/Validate con:
+   *   - Reference (obligatorio)
+   *   - Amount (obligatorio)
+   *   - DateMovement (fecha del pago)
+   *   - ClientID (RIF del colegio, fijo)
+   *   - AccountNumber (cuenta del colegio, fija)
    *
-   * Ambas deben encontrar el movimiento para considerar el pago verificado.
-   * Si una falla o no encuentra → manual_review.
+   * Si el banco confirma que el movimiento existe → success.
+   * Caso contrario → manual_review.
    */
   async cascadedValidation(validationData: any): Promise<CascadedValidationResult> {
     const SCHOOL_CLIENT_ID = 'J505275356';
@@ -288,11 +292,6 @@ export class BankAPI {
         result.message = 'La referencia es obligatoria.';
         return result;
       }
-      if (!validationData.PhoneNumber || String(validationData.PhoneNumber).trim() === '') {
-        result.overallResult = 'error';
-        result.message = 'El teléfono del pagador es obligatorio.';
-        return result;
-      }
 
       let movementDate: Date;
       if (validationData.RequestDate) {
@@ -308,7 +307,7 @@ export class BankAPI {
       const childClientID = validationData.ChildClientID?.trim() ? validationData.ChildClientID : undefined;
       const branchID = validationData.BranchID?.trim() ? validationData.BranchID : undefined;
 
-      // ── 1. Validate (con referencia) ──
+      // Única validación: por referencia
       try {
         const refPayload: any = {
           ClientID: SCHOOL_CLIENT_ID,
@@ -329,6 +328,14 @@ export class BankAPI {
           movementExists: refResult.MovementExists,
           data: refResult,
         };
+
+        if (refResult.MovementExists) {
+          result.overallResult = 'success';
+          result.message = 'Pago verificado exitosamente mediante la referencia.';
+        } else {
+          result.overallResult = 'manual_review';
+          result.message = 'No se encontró el movimiento con la referencia suministrada. Verifique los datos o contacte al administrador.';
+        }
       } catch (error: any) {
         console.error(`🚨 [BNC] Validate falló:`, error.message);
         result.details.validateReference = {
@@ -337,58 +344,8 @@ export class BankAPI {
           movementExists: false,
           error: error.message,
         };
-      }
-
-      // ── 2. ValidateExistence (sin referencia) ──
-      try {
-        const existencePayload: any = {
-          AccountNumber: SCHOOL_ACCOUNT,
-          BankCode: validationData.BankCode,
-          PhoneNumber: validationData.PhoneNumber,
-          ClientID: SCHOOL_CLIENT_ID,
-          RequestDate: formattedDate,
-          Amount: Number(validationData.Amount),
-        };
-        if (childClientID) existencePayload.ChildClientID = childClientID;
-        if (branchID) existencePayload.BranchID = branchID;
-
-        console.log('🔍 [BNC] ValidateExistence payload:', JSON.stringify(existencePayload));
-
-        const existenceResult = await this.sendRequest<ValidationResponse>('/Position/ValidateExistence', existencePayload);
-        result.details.validateExistence = {
-          executed: true,
-          success: true,
-          movementExists: existenceResult.MovementExists,
-          data: existenceResult,
-        };
-      } catch (error: any) {
-        console.error(`🚨 [BNC] ValidateExistence falló:`, error.message);
-        result.details.validateExistence = {
-          executed: true,
-          success: false,
-          movementExists: false,
-          error: error.message,
-        };
-      }
-
-      // ── Decisión final: AMBAS deben encontrar ──
-      const refOk = result.details.validateReference.movementExists;
-      const existOk = result.details.validateExistence.movementExists;
-
-      if (refOk && existOk) {
-        result.overallResult = 'success';
-        result.message = 'Pago verificado exitosamente por referencia y por existencia.';
-      } else if (refOk && !existOk) {
-        // Muy probablemente el pago NO es P2P (es PMPC, C2P, transferencia, etc.)
-        // y ValidateExistence solo cubre P2P. Se reporta para revisión manual.
         result.overallResult = 'manual_review';
-        result.message = 'El pago se encontró por referencia, pero el banco no lo reconoce como P2P (ValidateExistence). Probablemente sea un pago PMPC/C2P/transferencia, que requiere verificación manual.';
-      } else if (!refOk && existOk) {
-        result.overallResult = 'manual_review';
-        result.message = 'El pago se encontró por teléfono/banco, pero la referencia no coincidió. Verificación manual requerida.';
-      } else {
-        result.overallResult = 'manual_review';
-        result.message = 'No se encontró el movimiento en ninguna validación. Verifique los datos o contacte al administrador.';
+        result.message = `Error al consultar el banco: ${error.message}`;
       }
 
       return result;
