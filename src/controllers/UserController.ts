@@ -1168,66 +1168,86 @@ static adduser = async (req: Request, res: Response) => {
     };
     //#endregion
 
-    //#region: Obtener lista de estudiantes (para dashboard)
+        //#region: Obtener lista de estudiantes (para dashboard)
     static listStudents = async (req: Request, res: Response) => {
-  try {
-    const { page = 1, limit = 100, status, search } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+      try {
+        const {
+          page = 1,
+          limit = 100,
+          status,
+          search,
+          grade,     // ✅ AGREGADO
+          section,   // ✅ AGREGADO
+        } = req.query;
 
-    const where: any = {};
+        const offset = (Number(page) - 1) * Number(limit);
+        const where: any = {};
 
-    if (status) {
-      where.status = status;
-    }
+        if (status && typeof status === 'string' && status !== 'all') {
+          where.status = status;
+        }
 
-    if (search && typeof search === 'string') {
-      where[Op.or] = [
-        { fullName: { [Op.iLike]: `%${search}%` } },
-        { identityCard: { [Op.iLike]: `%${search}%` } },
-        { currentGrade: { [Op.iLike]: `%${search}%` } },
-        // ✅ Búsqueda por nombre o cédula del representante
-        { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
-        { '$representative.identityCard$': { [Op.iLike]: `%${search}%` } }
-      ];
-    }
+        // ✅ Filtro por grado
+        if (grade && typeof grade === 'string' && grade.trim() !== '' && grade !== 'all') {
+          where.currentGrade = grade;
+        }
 
-    const { count, rows: students } = await Student.findAndCountAll({
-      where,
-      limit: Number(limit),
-      offset,
-      order: [['fullName', 'ASC']],
-      attributes: [
+        // ✅ Filtro por sección
+        if (section && typeof section === 'string' && section.trim() !== '' && section !== 'all') {
+          where.section = section;
+        }
+
+        if (search && typeof search === 'string') {
+          where[Op.or] = [
+            { fullName: { [Op.iLike]: `%${search}%` } },
+            { identityCard: { [Op.iLike]: `%${search}%` } },
+            { currentGrade: { [Op.iLike]: `%${search}%` } },
+            { '$representative.fullName$': { [Op.iLike]: `%${search}%` } },
+            { '$representative.identityCard$': { [Op.iLike]: `%${search}%` } },
+          ];
+        }
+
+        console.log('🎯 [listStudents] Aplicando filtros:', {
+          page, limit, status, grade, section, search,
+          whereGenerado: where,
+        });
+
+        const { count, rows: students } = await Student.findAndCountAll({
+          where,
+          limit: Number(limit),
+          offset,
+          order: [['fullName', 'ASC']],
+          attributes: [
             'id', 'fullName', 'identityCard', 'birthDate', 'status',
             'currentGrade', 'section', 'createdAt', 'balance',
-            'exonerationPercent', 'admissionDate', 'representativeId', 'userId' // ✅ Añadido
-      ],
-      include: [{
-        model: Representative,
-        as: 'representative',
-        attributes: ['id', 'fullName', 'identityCard']
-      }]
-    });
+            'exonerationPercent', 'admissionDate', 'representativeId', 'userId',
+          ],
+          include: [{
+            model: Representative,
+            as: 'representative',
+            attributes: ['id', 'fullName', 'identityCard'],
+          }],
+        });
 
-    res.status(200).json({
-      result: true,
-      content: students,
-      pagination: {
-        totalRecords: count,
-        currentPage: Number(page),
-        totalPages: Math.ceil(count / Number(limit)),
-      },
-      error: []
-    });
-
-  } catch (error: any) {
-    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("listStudents"));
-    res.status(500).json({
-      result: false,
-      content: [],
-      error: ['Error al obtener estudiantes']
-    });
-  }
-};
+        res.status(200).json({
+          result: true,
+          content: students,
+          pagination: {
+            totalRecords: count,
+            currentPage: Number(page),
+            totalPages: Math.ceil(count / Number(limit)),
+          },
+          error: [],
+        });
+      } catch (error: any) {
+        ErrorLog.createErrorLog(error, 'Server', getErrorLocation('listStudents'));
+        res.status(500).json({
+          result: false,
+          content: [],
+          error: ['Error al obtener estudiantes'],
+        });
+      }
+    };
     //#endregion
 
     //#region: Estadísticas de usuarios (para dashboard)
