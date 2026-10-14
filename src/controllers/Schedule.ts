@@ -88,7 +88,6 @@ export class ScheduleController {
         }
       }
 
-      // ✅ Validación de código consistente — SOLO para materias (no para recesos)
       if (!isRecess) {
         const existingWithSameCode = await Schedule.findOne({
           where: { code: scheduleData.code },
@@ -136,7 +135,6 @@ export class ScheduleController {
         }
       }
 
-      // Verificar superposición de horarios
       let overlappingCondition: any = {
         grade: scheduleData.grade,
         section: scheduleData.section,
@@ -255,7 +253,6 @@ export class ScheduleController {
     }
   };
 
-  // ✅ Códigos únicos para el dropdown — EXCLUYE RECESOS
   static getUniqueScheduleCodes = async (req: Request, res: Response) => {
     try {
       const schedules = await Schedule.findAll({
@@ -268,7 +265,6 @@ export class ScheduleController {
 
       const byCode = new Map<string, any>();
       schedules.forEach((s: any) => {
-        // ✅ Excluir recesos: no se muestran en el listado de "Cargar existente"
         if (!s.subjectId) return;
 
         if (!byCode.has(s.code)) {
@@ -675,6 +671,13 @@ export class ScheduleController {
     }
   };
 
+  /**
+   * ✅ CORREGIDO:
+   *  - Carga los bloques (horarios configurados) de TODOS los días, no solo de los
+   *    días que tienen schedules.
+   *  - Carga los schedules del grado/sección y los agrupa por día.
+   *  - Siempre incluye el bloque 5 (receso) con su hora, aunque no exista schedule.
+   */
   static getChildrenSchedules = async (req: Request, res: Response) => {
     try {
       const userId = req.tokenData?.id;
@@ -693,94 +696,127 @@ export class ScheduleController {
         return res.json({ result: true, content: [], error: [] });
       }
 
+      const DAYS = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'];
       const result = [];
 
+      const normalizeGrade = (value: unknown): string =>
+        String(value || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s*a?no\s*$/, '')
+          .replace(/\s+/g, '');
+
       for (const student of students) {
-        const studentSchedules = await StudentSchedule.findAll({
-          where: { studentId: student.id },
-          include: [
-            {
-              model: Schedule,
-              as: 'schedule',
-              include: [
-                {
-                  model: Subject,
-                  as: 'subject',
-                  include: [{
-                    model: Teacher,
-                    as: 'teacher',
-                    attributes: ['id', 'fullName', 'email']
-                  }]
-                },
-                {
-                  model: Teacher,
-                  as: 'teacher',
-                  attributes: ['id', 'fullName', 'email']
-                }
-              ]
-            }
-          ],
-          order: [
-            [{ model: Schedule, as: 'schedule' }, 'day', 'ASC'],
-            [{ model: Schedule, as: 'schedule' }, 'startBlock', 'ASC']
-          ]
-        });
+        const gradeNorm = normalizeGrade(student.currentGrade);
+        const sectionNorm = String(student.section || '').trim().toUpperCase();
 
-        const sectionSchedules = (await Schedule.findAll({
-              include: [
-                { model: Subject, as: 'subject', include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }] },
-                { model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }
-              ],
-              order: [['day', 'ASC'], ['startBlock', 'ASC']]
-            })).filter(schedule => {
-              const normalize = (value: unknown) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s*a?no\s*$/, '').replace(/\s+/g, '');
-              return normalize(schedule.grade) === normalize(student.currentGrade) && String(schedule.section || '').trim().toUpperCase() === String(student.section || '').trim().toUpperCase();
-            }).map(schedule => ({ schedule } as any));
-        const schedulesBySection = sectionSchedules.length > 0
-          ? sectionSchedules
-          : studentSchedules.filter((item: any) => item.schedule);
-
-        const schedulesByDay: Record<string, any[]> = {};
+        // ══════════════════════════════════════════════════════════════════
+        // 1) Cargar los bloques (horarios) de TODOS los días para el grado/sección
+        // ══════════════════════════════════════════════════════════════════
         const blockTimesByDay: Record<string, any[]> = {};
-
-        for (const ss of schedulesBySection) {
-          const schedule = ss.schedule;
-          if (!schedule || !schedule.day || !schedule.startBlock || !schedule.endBlock) continue;
-
-          const day = String(schedule.day).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          const startBlock = schedule.startBlock;
-          const endBlock = schedule.endBlock;
-
-          if (!schedulesByDay[day]) schedulesByDay[day] = [];
-          schedulesByDay[day].push({
-            blockId: startBlock,
-            time: `${startBlock}-${endBlock}`,
-            period: '',
-            isBreak: false,
-            isOccupied: false,
-            subject: schedule.subject?.name,
-            subjectCode: schedule.subject?.code,
-            teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
-            classroom: schedule.classroom,
-            spans: endBlock - startBlock + 1,
-          });
-
-          if (!blockTimesByDay[day]) {
+        for (const day of DAYS) {
+          try {
             const blocks = await BlockTimeConfig.findAll({
               where: {
-                grade: schedule.grade || student.currentGrade || '',
-                section: schedule.section || student.section || '',
-                day: day,
+                grade: student.currentGrade || '',
+                section: student.section || '',
+                day,
                 isActive: true,
               },
               order: [['blockNumber', 'ASC']],
             });
-            blockTimesByDay[day] = blocks.map(b => ({
-              blockNumber: b.blockNumber,
-              startTime: b.startTime ? String(b.startTime) : '',
-              endTime: b.endTime ? String(b.endTime) : '',
-              isActive: b.isActive,
-            }));
+
+            if (blocks.length > 0) {
+              blockTimesByDay[day] = blocks.map(b => ({
+                blockNumber: b.blockNumber,
+                startTime: b.startTime ? String(b.startTime) : '',
+                endTime: b.endTime ? String(b.endTime) : '',
+                isActive: b.isActive,
+              }));
+            } else {
+              blockTimesByDay[day] = DEFAULT_BLOCK_TIMES.map(b => ({ ...b }));
+            }
+          } catch {
+            blockTimesByDay[day] = DEFAULT_BLOCK_TIMES.map(b => ({ ...b }));
+          }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // 2) Cargar todos los schedules del grado/sección
+        // ══════════════════════════════════════════════════════════════════
+        const allSchedules = await Schedule.findAll({
+          include: [
+            {
+              model: Subject,
+              as: 'subject',
+              include: [{ model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] }],
+            },
+            { model: Teacher, as: 'teacher', attributes: ['id', 'fullName', 'email'] },
+          ],
+          order: [['day', 'ASC'], ['startBlock', 'ASC']],
+        });
+
+        const sectionSchedules = allSchedules.filter(schedule => {
+          return (
+            normalizeGrade(schedule.grade) === gradeNorm &&
+            String(schedule.section || '').trim().toUpperCase() === sectionNorm
+          );
+        });
+
+        // ══════════════════════════════════════════════════════════════════
+        // 3) Armar schedulesByDay (con schedules existentes)
+        // ══════════════════════════════════════════════════════════════════
+        const schedulesByDay: Record<string, any[]> = {
+          lunes: [], martes: [], miercoles: [], jueves: [], viernes: [],
+        };
+
+        for (const schedule of sectionSchedules) {
+          if (!schedule.day || !schedule.startBlock || !schedule.endBlock) continue;
+
+          const day = String(schedule.day)
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+
+          if (!schedulesByDay[day]) schedulesByDay[day] = [];
+
+          const isRecess = !schedule.subjectId;
+          const spans = isRecess ? 1 : (schedule.endBlock - schedule.startBlock + 1);
+
+          schedulesByDay[day].push({
+            blockId: schedule.startBlock,
+            time: `${schedule.startBlock}-${schedule.endBlock}`,
+            period: '',
+            isBreak: isRecess,
+            isOccupied: false,
+            subject: isRecess ? 'RECESO' : (schedule.subject?.name || ''),
+            subjectCode: schedule.subject?.code,
+            teacher: schedule.teacher?.fullName || schedule.subject?.teacher?.fullName,
+            classroom: schedule.classroom,
+            spans,
+            scheduleId: schedule.id,
+          });
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // 4) Receso por defecto en bloque 5 si no existe schedule
+        // ══════════════════════════════════════════════════════════════════
+        for (const day of DAYS) {
+          const hasRecess = schedulesByDay[day].some(b => b.blockId === 5);
+          const hasBlock5 = (blockTimesByDay[day] || []).some(b => b.blockNumber === 5);
+
+          if (!hasRecess && hasBlock5) {
+            schedulesByDay[day].push({
+              blockId: 5,
+              time: '5-5',
+              period: 'Receso',
+              isBreak: true,
+              isOccupied: false,
+              subject: 'RECESO',
+              spans: 1,
+              scheduleId: null,
+            });
           }
         }
 
