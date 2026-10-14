@@ -21,7 +21,8 @@ export enum PaymentMethod {
   DEBIT_CARD = 'debit_card',
   CREDIT_CARD = 'credit_card',
   PAGO_MOVIL = 'pago_movil',
-  CHECK = 'check'
+  CHECK = 'check',
+  ZELLE = 'zelle',
 }
 
 export enum TransactionStatus {
