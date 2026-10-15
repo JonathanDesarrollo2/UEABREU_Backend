@@ -1169,4 +1169,141 @@ export class BillingService {
       await student.update({ balance: (student.balance || 0) + discountUSD });
     }
   }
+  /**
+ * Revierte el recargo por pronto pago vencido cuando un pago fue realmente
+ * realizado ANTES del día límite de pronto pago (según `paymentDate`).
+ *
+ * Reglas:
+ *  - Solo aplica si el día de la `paymentDate` es <= `prontoPagoDeadlineDay`.
+ *  - Busca el recargo del MISMO mes/año de la `paymentDate`.
+ *  - Solo revierte si luego de aplicar el depósito + reversión el estudiante
+ *    queda en balance >= 0. Es decir, si aún queda deuda, NO se le quita
+ *    el recargo (debe pagar completo).
+ *  - Idempotente: si ya existe "Reversión recargo pronto pago [Mes] [Año]",
+ *    no se duplica.
+ *
+ * @param paymentDateStr Fecha del pago en formato 'YYYY-MM-DD'
+ */
+public static async revertProntoPagoIfPaidOnTime(
+  studentId: string,
+  representativeId: string,
+  paymentDateStr: string,
+  transaction: any
+): Promise<{ reverted: boolean; amountUSD?: number; reason?: string }> {
+  try {
+    // 1. Parsear la fecha SIN usar new Date() para evitar problemas de TZ
+    const [yearStr, monthStr, dayStr] = String(paymentDateStr).slice(0, 10).split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10) - 1; // 0-indexed
+    const day = parseInt(dayStr, 10);
+
+    if (!year || isNaN(month) || !day) {
+      return { reverted: false, reason: 'invalid_payment_date' };
+    }
+
+    const fees = await this.getSchoolFees();
+    const deadlineDay = fees.prontoPagoDeadlineDay || 10;
+
+    // 2. ¿Se pagó dentro del plazo?
+    if (day > deadlineDay) {
+      return { reverted: false, reason: 'payment_after_deadline' };
+    }
+
+    const monthNames = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+    ];
+    const monthName = monthNames[month];
+
+    // 3. Buscar el recargo de ese mes
+    const recargoDesc = `Recargo por pronto pago vencido ${monthName} ${year}`;
+    const recargoTx = await Transaction.findOne({
+      where: {
+        studentId,
+        type: TransactionType.FEE,
+        description: recargoDesc,
+      },
+      transaction,
+    });
+
+    if (!recargoTx) {
+      return { reverted: false, reason: 'no_recargo_found' };
+    }
+
+    // 4. ¿Ya fue revertido antes? (idempotencia)
+    const reversalDesc = `Reversión recargo pronto pago ${monthName} ${year}`;
+    const existingReversal = await Transaction.findOne({
+      where: {
+        studentId,
+        type: TransactionType.ADJUSTMENT,
+        description: reversalDesc,
+      },
+      transaction,
+    });
+
+    if (existingReversal) {
+      return { reverted: false, reason: 'already_reverted' };
+    }
+
+    // 5. ¿El estudiante quedaría sin deuda tras la reversión?
+    const student = await Student.findByPk(studentId, { transaction });
+    if (!student) {
+      return { reverted: false, reason: 'student_not_found' };
+    }
+
+    const currentBalance = Number(student.balance) || 0;
+    const recargoAmount = Number(recargoTx.amountUSD) || Number(fees.prontoPagoDiscount) || 0;
+
+    if (recargoAmount <= 0) {
+      return { reverted: false, reason: 'recargo_amount_zero' };
+    }
+
+    // ⚠️ Regla clave: si aún queda deuda, no se revierte
+    if (currentBalance + recargoAmount < 0) {
+      return { reverted: false, reason: 'still_has_debt_after_reversal' };
+    }
+
+    // 6. Crear la transacción de reversión
+    const bcvRate = Number(recargoTx.bcvRate) ||
+      (await this.getRateForDate(String(paymentDateStr).slice(0, 10)));
+    const recargoAmountBs = Number(recargoTx.amount) ||
+      Math.round(recargoAmount * bcvRate * 100) / 100;
+
+    const balanceBefore = currentBalance;
+    const balanceAfter = Math.round((currentBalance + recargoAmount) * 100) / 100;
+
+    await Transaction.create({
+      studentId: student.id,
+      representativeId,
+      type: TransactionType.ADJUSTMENT,
+      amount: recargoAmountBs,
+      amountUSD: recargoAmount,
+      bcvRate,
+      description: reversalDesc,
+      paymentMethod: recargoTx.paymentMethod || PaymentMethod.CASH,
+      status: TransactionStatus.COMPLETED,
+      balanceBefore,
+      balanceAfter,
+      metadata: {
+        isProntoPagoReversal: true,
+        revertedTransactionId: recargoTx.id,
+        reason: 'Pago registrado dentro del plazo de pronto pago',
+        paymentDate: String(paymentDateStr).slice(0, 10),
+        revertedAt: new Date().toISOString(),
+      },
+    }, { transaction });
+
+    await student.update({ balance: balanceAfter }, { transaction });
+
+    console.log(
+      `🔄 Pronto pago revertido para estudiante ${student.id} ` +
+      `(${monthName} ${year}): +${recargoAmount} USD`
+    );
+
+    return { reverted: true, amountUSD: recargoAmount };
+  } catch (error: any) {
+    console.error('⚠️ Error en revertProntoPagoIfPaidOnTime:', error.message);
+    return { reverted: false, reason: `error: ${error.message}` };
+  }
+}
 }
