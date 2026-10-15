@@ -622,102 +622,145 @@ export class BalanceController {
     return null;
   };
 
-    static manualDeposit = async (req: Request, res: Response) => {
-    const transaction = await sequelize.transaction();
-    try {
-      const { id } = req.params;
-      const { amount, description, paymentMethod, reference, studentId, paymentDate, paymentTime } = req.body;
+  static manualDeposit = async (req: Request, res: Response) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const {
+      amount,
+      description,
+      paymentMethod,
+      reference,
+      studentId,
+      paymentDate,
+      paymentTime,
+      // 🔽 NUEVOS (opcionales, pero los guardamos si vienen)
+      bankCode,
+      payerId,
+      payerPhone,
+    } = req.body;
 
-      if (!amount || amount <= 0) {
-        await transaction.rollback();
-        return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
-      }
-
-      // ✅ Referencia OBLIGATORIA y única por clave (últimos 6 dígitos)
-      const refError = await BalanceController.validateReferenceKey(reference, transaction);
-      if (refError) {
-        await transaction.rollback();
-        return res.status(409).json({ result: false, content: [], error: [refError] });
-      }
-
-      const cleanReference = String(reference).trim();
-
-      const bcvRate = await BillingService.getRateForDate(String(paymentDate).slice(0, 10));
-      const amountUSD = amount / bcvRate;
-
-      const representative = await Representative.findByPk(id, {
-        transaction,
-        include: [{ model: Student, as: 'students' }]
-      });
-      if (!representative) {
-        await transaction.rollback();
-        return res.status(404).json({ result: false, content: [], error: ['Representante no encontrado'] });
-      }
-
-      const validCreatedBy = req.tokenData?.id || null;
-
-      let targetStudentId: string | null = null;
-      let newTotalBalanceUSD: number;
-      let updatedStudentIds: string[] = [];
-
-      const totalBeforeUSD = representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
-
-      if (studentId) {
-        const student = await Student.findOne({ where: { id: studentId, representativeId: id }, transaction });
-        if (!student) {
-          await transaction.rollback();
-          return res.status(400).json({ result: false, content: [], error: ['Estudiante no encontrado o no pertenece al representante'] });
-        }
-
-        const newBalanceUSD = (student.balance || 0) + amountUSD;
-        await student.update({ balance: newBalanceUSD }, { transaction });
-        targetStudentId = student.id!;
-        updatedStudentIds.push(student.id!);
-        const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
-        newTotalBalanceUSD = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
-      } else {
-        updatedStudentIds = await this.distributeAmountAmongStudents(id, amountUSD, transaction);
-        const updatedStudents = await Student.findAll({ where: { representativeId: id }, transaction });
-        newTotalBalanceUSD = updatedStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
-      }
-
-      const newTransaction = await Transaction.create({
-        representativeId: id,
-        studentId: targetStudentId,
-        type: TransactionType.DEPOSIT,
-        amount: amount,
-        amountUSD: amountUSD,
-        bcvRate: bcvRate,
-        description: description || 'Depósito manual',
-        paymentMethod: paymentMethod || PaymentMethod.CASH,
-        reference: cleanReference,   // ✅ sin fallback
-        status: TransactionStatus.COMPLETED,
-        createdBy: validCreatedBy,
-        balanceBefore: totalBeforeUSD,
-        balanceAfter: newTotalBalanceUSD,
-        transactionDate: new Date(),
-        paymentTime,
-      }, { transaction });
-
-      await transaction.commit();
-
-      res.status(200).json({
-        result: true,
-        content: {
-          message: 'Depósito registrado exitosamente',
-          transactionId: newTransaction.id,
-          newBalanceUSD: newTotalBalanceUSD,
-          distributedAmong: updatedStudentIds.length,
-          appliedToStudent: targetStudentId
-        },
-        error: []
-      });
-    } catch (error: any) {
+    if (!amount || amount <= 0) {
       await transaction.rollback();
-      ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
-      res.status(500).json({ result: false, content: [], error: [`Error al realizar depósito: ${error.message}`] });
+      return res.status(400).json({ result: false, content: [], error: ['El monto debe ser mayor a 0'] });
     }
-  };
+
+    // ✅ Referencia OBLIGATORIA y única por clave (últimos 6 dígitos)
+    const refError = await BalanceController.validateReferenceKey(reference, transaction);
+    if (refError) {
+      await transaction.rollback();
+      return res.status(409).json({ result: false, content: [], error: [refError] });
+    }
+
+    const cleanReference = String(reference).trim();
+    const paymentDateStr = String(paymentDate).slice(0, 10);
+
+    const bcvRate = await BillingService.getRateForDate(paymentDateStr);
+    const amountUSD = amount / bcvRate;
+
+    const representative = await Representative.findByPk(id, {
+      transaction,
+      include: [{ model: Student, as: 'students' }]
+    });
+    if (!representative) {
+      await transaction.rollback();
+      return res.status(404).json({ result: false, content: [], error: ['Representante no encontrado'] });
+    }
+
+    const validCreatedBy = req.tokenData?.id || null;
+
+    let targetStudentId: string | null = null;
+    let updatedStudentIds: string[] = [];
+    const totalBeforeUSD =
+      representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
+
+    // ── 1. Aplicar el depósito ──────────────────────────────────────
+    if (studentId) {
+      const student = await Student.findOne({ where: { id: studentId, representativeId: id }, transaction });
+      if (!student) {
+        await transaction.rollback();
+        return res.status(400).json({ result: false, content: [], error: ['Estudiante no encontrado o no pertenece al representante'] });
+      }
+      const newBalanceUSD = (student.balance || 0) + amountUSD;
+      await student.update({ balance: newBalanceUSD }, { transaction });
+      targetStudentId = student.id!;
+      updatedStudentIds.push(student.id!);
+    } else {
+      updatedStudentIds = await this.distributeAmountAmongStudents(id, amountUSD, transaction);
+    }
+
+    // Total después del depósito (sin revertir pronto pago)
+    const afterDeposit = await Student.findAll({ where: { representativeId: id }, transaction });
+    const totalAfterDepositUSD = afterDeposit.reduce((sum, s) => sum + (s.balance || 0), 0);
+
+    // ── 2. Intentar revertir pronto pago para cada estudiante afectado ──
+    const prontoPagoReverted: Array<{ studentId: string; amountUSD: number; description: string }> = [];
+    for (const sid of updatedStudentIds) {
+      const result = await BillingService.revertProntoPagoIfPaidOnTime(
+        sid,
+        id,
+        paymentDateStr,
+        transaction
+      );
+      if (result.reverted && result.amountUSD) {
+        prontoPagoReverted.push({
+          studentId: sid,
+          amountUSD: result.amountUSD,
+          description: `+${result.amountUSD} USD`,
+        });
+      }
+    }
+
+    // Total final (con reversiones aplicadas)
+    const finalStudents = await Student.findAll({ where: { representativeId: id }, transaction });
+    const finalTotalBalanceUSD = finalStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
+
+    // ── 3. Crear la transacción de depósito ─────────────────────────
+    const newTransaction = await Transaction.create({
+      representativeId: id,
+      studentId: targetStudentId,
+      type: TransactionType.DEPOSIT,
+      amount: amount,
+      amountUSD: amountUSD,
+      bcvRate: bcvRate,
+      description: description || 'Depósito manual',
+      paymentMethod: paymentMethod || PaymentMethod.CASH,
+      reference: cleanReference,
+      status: TransactionStatus.COMPLETED,
+      createdBy: validCreatedBy,
+      balanceBefore: totalBeforeUSD,
+      balanceAfter: totalAfterDepositUSD, // refleja solo el depósito, antes de reversiones
+      transactionDate: paymentDateStr as any, // ✅ fecha REAL del pago
+      paymentTime: paymentTime || null,
+      bankCode: bankCode ? String(bankCode) : null,
+      metadata: {
+        payerId: payerId || null,
+        payerPhone: payerPhone || null,
+        registeredAt: new Date().toISOString(),
+        prontoPagoReverted: prontoPagoReverted.length > 0 ? prontoPagoReverted : null,
+      },
+    }, { transaction });
+
+    await transaction.commit();
+
+    res.status(200).json({
+      result: true,
+      content: {
+        message: 'Depósito registrado exitosamente',
+        transactionId: newTransaction.id,
+        newBalanceUSD: finalTotalBalanceUSD,
+        distributedAmong: updatedStudentIds.length,
+        appliedToStudent: targetStudentId,
+        prontoPagoReverted,
+      },
+      error: []
+    });
+  } catch (error: any) {
+    await transaction.rollback();
+    ErrorLog.createErrorLog(error, 'Server', getErrorLocation("manualDeposit"));
+    res.status(500).json({ result: false, content: [], error: [`Error al realizar depósito: ${error.message}`] });
+  }
+};
 
     static manualWithdrawal = async (req: Request, res: Response) => {
     const transaction = await sequelize.transaction();

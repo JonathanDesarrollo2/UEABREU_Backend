@@ -82,6 +82,11 @@ router.post('/representative/:id/deposit',
   body('reference').optional().isString(),
   body('studentId').optional().isUUID().withMessage('ID de estudiante inválido'),
   body('paymentDate').notEmpty().isISO8601().withMessage('La fecha del pago es obligatoria'),
+  body('paymentTime').optional().isString().isLength({ max: 5 }),
+  // 🆕 nuevos campos opcionales
+  body('bankCode').optional().isString().isLength({ max: 20 }),
+  body('payerId').optional().isString().isLength({ max: 30 }),
+  body('payerPhone').optional().isString().isLength({ max: 30 }),
   validateRoutes,
   BalanceController.manualDeposit
 );
