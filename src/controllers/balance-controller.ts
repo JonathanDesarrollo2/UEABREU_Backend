@@ -638,10 +638,10 @@ export class BalanceController {
       studentId,
       paymentDate,
       paymentTime,
-      // 🔽 NUEVOS (opcionales, pero los guardamos si vienen)
       bankCode,
       payerId,
       payerPhone,
+      distribution, // NUEVO: Array<{ studentId, amountUSD }>
     } = req.body;
 
     if (!amount || amount <= 0) {
@@ -660,7 +660,7 @@ export class BalanceController {
     const paymentDateStr = String(paymentDate).slice(0, 10);
 
     const bcvRate = await BillingService.getRateForDate(paymentDateStr);
-    const amountUSD = amount / bcvRate;
+    const amountUSD = Math.round((amount / bcvRate) * 100) / 100;
 
     const representative = await Representative.findByPk(id, {
       transaction,
@@ -678,18 +678,79 @@ export class BalanceController {
     const totalBeforeUSD =
       representative.students?.reduce((sum, s) => sum + (s.balance || 0), 0) || 0;
 
-    // ── 1. Aplicar el depósito ──────────────────────────────────────
-    if (studentId) {
+    // ── Determinar la estrategia de distribución ────────────────────
+    let distributionPlan: Array<{ studentId: string; amountUSD: number; studentName?: string }> | null = null;
+
+    if (Array.isArray(distribution) && distribution.length > 0) {
+      // ── Distribución personalizada (multi-estudiante) ──
+      const normalized = distribution.map((d: any) => ({
+        studentId: String(d.studentId),
+        amountUSD: Math.round(Number(d.amountUSD) * 100) / 100,
+      }));
+
+      // Validar suma
+      const sumUSD = Math.round(normalized.reduce((s, d) => s + d.amountUSD, 0) * 100) / 100;
+      if (Math.abs(sumUSD - amountUSD) > 0.05) {
+        await transaction.rollback();
+        return res.status(400).json({
+          result: false,
+          content: [],
+          error: [`La distribución (${sumUSD} USD) no coincide con el monto total (${amountUSD} USD)`]
+        });
+      }
+
+      // Validar cada estudiante
+      for (const item of normalized) {
+        if (item.amountUSD <= 0) {
+          await transaction.rollback();
+          return res.status(400).json({ result: false, content: [], error: ['Monto inválido en distribución'] });
+        }
+        const student = await Student.findOne({
+          where: { id: item.studentId, representativeId: id },
+          transaction,
+        });
+        if (!student) {
+          await transaction.rollback();
+          return res.status(400).json({
+            result: false,
+            content: [],
+            error: [`Estudiante ${item.studentId} no encontrado o no pertenece al representante`]
+          });
+        }
+      }
+
+      // Aplicar a cada estudiante
+      for (const item of normalized) {
+        const student = await Student.findByPk(item.studentId, { transaction });
+        if (!student) continue;
+        const newBalance = Math.round(((student.balance || 0) + item.amountUSD) * 100) / 100;
+        await student.update({ balance: newBalance }, { transaction });
+        updatedStudentIds.push(student.id!);
+        distributionPlan = distributionPlan || [];
+        distributionPlan.push({
+          studentId: student.id!,
+          amountUSD: item.amountUSD,
+          studentName: student.fullName,
+        });
+      }
+
+      // Si es un único estudiante en la distribución, lo marcamos como target
+      if (normalized.length === 1) {
+        targetStudentId = normalized[0].studentId;
+      }
+    } else if (studentId) {
+      // ── Un solo estudiante ──
       const student = await Student.findOne({ where: { id: studentId, representativeId: id }, transaction });
       if (!student) {
         await transaction.rollback();
         return res.status(400).json({ result: false, content: [], error: ['Estudiante no encontrado o no pertenece al representante'] });
       }
-      const newBalanceUSD = (student.balance || 0) + amountUSD;
+      const newBalanceUSD = Math.round(((student.balance || 0) + amountUSD) * 100) / 100;
       await student.update({ balance: newBalanceUSD }, { transaction });
       targetStudentId = student.id!;
       updatedStudentIds.push(student.id!);
     } else {
+      // ── Distribuir parejo entre todos ──
       updatedStudentIds = await this.distributeAmountAmongStudents(id, amountUSD, transaction);
     }
 
@@ -697,7 +758,7 @@ export class BalanceController {
     const afterDeposit = await Student.findAll({ where: { representativeId: id }, transaction });
     const totalAfterDepositUSD = afterDeposit.reduce((sum, s) => sum + (s.balance || 0), 0);
 
-    // ── 2. Intentar revertir pronto pago para cada estudiante afectado ──
+    // ── Revertir pronto pago para cada estudiante afectado ──
     const prontoPagoReverted: Array<{ studentId: string; amountUSD: number; description: string }> = [];
     for (const sid of updatedStudentIds) {
       const result = await BillingService.revertProntoPagoIfPaidOnTime(
@@ -719,7 +780,7 @@ export class BalanceController {
     const finalStudents = await Student.findAll({ where: { representativeId: id }, transaction });
     const finalTotalBalanceUSD = finalStudents.reduce((sum, s) => sum + (s.balance || 0), 0);
 
-    // ── 3. Crear la transacción de depósito ─────────────────────────
+    // ── Crear la transacción de depósito ─────────────────────────
     const newTransaction = await Transaction.create({
       representativeId: id,
       studentId: targetStudentId,
@@ -733,8 +794,8 @@ export class BalanceController {
       status: TransactionStatus.COMPLETED,
       createdBy: validCreatedBy,
       balanceBefore: totalBeforeUSD,
-      balanceAfter: totalAfterDepositUSD, // refleja solo el depósito, antes de reversiones
-      transactionDate: paymentDateStr as any, // ✅ fecha REAL del pago
+      balanceAfter: totalAfterDepositUSD,
+      transactionDate: paymentDateStr as any,
       paymentTime: paymentTime || null,
       bankCode: bankCode ? String(bankCode) : null,
       metadata: {
@@ -742,6 +803,15 @@ export class BalanceController {
         payerPhone: payerPhone || null,
         registeredAt: new Date().toISOString(),
         prontoPagoReverted: prontoPagoReverted.length > 0 ? prontoPagoReverted : null,
+        // Guardamos la distribución si aplica (para mostrar en recibos/historial)
+        distribution: distributionPlan && distributionPlan.length > 1
+          ? distributionPlan.map(d => ({
+              studentId: d.studentId,
+              studentName: d.studentName,
+              amountUSD: d.amountUSD,
+              amountBs: Math.round(d.amountUSD * bcvRate * 100) / 100,
+            }))
+          : null,
       },
     }, { transaction });
 
@@ -755,6 +825,7 @@ export class BalanceController {
         newBalanceUSD: finalTotalBalanceUSD,
         distributedAmong: updatedStudentIds.length,
         appliedToStudent: targetStudentId,
+        distribution: distributionPlan,
         prontoPagoReverted,
       },
       error: []
