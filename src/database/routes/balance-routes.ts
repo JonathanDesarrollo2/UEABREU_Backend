@@ -182,6 +182,7 @@ router.get('/transactions',
   query('studentSection').optional().isString(),
   query('sortBy').optional().isIn(['createdAt', 'amount', 'type', 'student.fullName']),
   query('sortOrder').optional().isIn(['asc', 'desc']),
+  query('paymentMethod').optional().isIn(['cash', 'bank_transfer', 'debit_card', 'credit_card', 'pago_movil', 'check', 'zelle']),
   validateRoutes,
   BalanceController.getAllTransactions
 );
@@ -227,5 +228,6 @@ router.get('/students-ranking',
   validateRoutes,
   BalanceController.getStudentsRanking
 );
+
 
 export default router;

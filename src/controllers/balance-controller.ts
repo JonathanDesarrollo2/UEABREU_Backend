@@ -367,7 +367,8 @@ export class BalanceController {
           'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
           'paymentMethod', 'reference', 'status', 'createdAt',
           'balanceBefore', 'balanceAfter', 'studentId', 'representativeId',
-          'createdBy', 'metadata'
+          'createdBy', 'metadata',
+          'transactionDate', 'bankCode', 'paymentTime',
         ],
         include: [
           { model: Student, as: 'student', required: false, attributes: ['id', 'fullName', 'currentGrade', 'section', 'status'] },
@@ -409,6 +410,9 @@ export class BalanceController {
           balanceAfterUSD,
           balanceBeforeUSD: t.balanceBefore,
           createdAt: t.createdAt,
+            transactionDate: t.transactionDate,   // ⬅️ NUEVO
+            bankCode: t.bankCode,                 // ⬅️ NUEVO
+            paymentTime: t.paymentTime,           // ⬅️ NUEVO
           student: t.student,
           representative: t.representative,
           metadata: (t as any).metadata || null,
@@ -1195,6 +1199,7 @@ export class BalanceController {
         balanceStatus,
         studentGrade,      // nuevo
         studentSection,    // nuevo
+        paymentMethod,  // ⬅️ NUEVO
       } = req.query;
 
       const offset = (Number(page) - 1) * Number(limit);
@@ -1203,6 +1208,7 @@ export class BalanceController {
       if (representativeId) where.representativeId = representativeId;
       if (studentId) where.studentId = studentId;
       if (type) where.type = type;
+      if (paymentMethod) where.paymentMethod = paymentMethod;  // ⬅️ NUEVO
       if (status) where.status = status;
 
       if (startDate || endDate) {
@@ -1288,7 +1294,8 @@ export class BalanceController {
           'id', 'type', 'amount', 'amountUSD', 'bcvRate', 'description',
           'paymentMethod', 'reference', 'status', 'createdAt',
           'balanceBefore', 'balanceAfter', 'studentId', 'representativeId',
-          'createdBy', 'metadata'
+          'createdBy', 'metadata',
+          'transactionDate', 'bankCode', 'paymentTime',
         ],
         include,
         distinct: true,
@@ -1310,6 +1317,9 @@ export class BalanceController {
           paymentStatus,
           balanceAfter: t.balanceAfter,
           createdAt: t.createdAt,
+          transactionDate: t.transactionDate,   // ⬅️ NUEVO
+          bankCode: t.bankCode,                 // ⬅️ NUEVO
+          paymentTime: t.paymentTime,           // ⬅️ NUEVO
           student: t.student,
           representative: t.representative,
           metadata: (t as any).metadata || null,
