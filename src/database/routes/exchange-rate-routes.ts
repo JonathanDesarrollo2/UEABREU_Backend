@@ -68,4 +68,12 @@ router.put(
   ExchangeRateController.updateRate
 );
 
+// 🆕 NUEVO: Forzar sincronización con el banco para la tasa de HOY.
+// Útil si necesitas forzar la descarga manualmente desde Postman o el frontend.
+router.post(
+  '/sync-today',
+  authsession,
+  ExchangeRateController.forceSyncToday
+);
+
 export default router;

@@ -4,6 +4,7 @@ import ExchangeRate from "../database/models/exchangeRate";
 import { ErrorLog } from "../utility/ErrorLog";
 import { getErrorLocation } from "../utility/callerinfo";
 import { Op } from "sequelize";
+import { BillingService } from "../services/billingServices"; // ⬅️ IMPORTANTE AÑADIR
 
 export class ExchangeRateController {
   /**
@@ -168,6 +169,31 @@ export class ExchangeRateController {
         result: false,
         content: [],
         error: ["Error al actualizar la tasa"],
+      });
+    }
+  };
+
+  /**
+   * POST /sync-today
+   * Fuerza una consulta al banco para traer la tasa de HOY y guardarla.
+   * Si falla, devuelve el error exacto del banco.
+   */
+  static forceSyncToday = async (req: Request, res: Response) => {
+    try {
+      const rate = await BillingService.getCurrentBCVRate();
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Caracas' });
+      
+      return res.status(200).json({
+        result: true,
+        content: { date: today, rate },
+        error: [],
+      });
+    } catch (error: any) {
+      ErrorLog.createErrorLog(error, "Server", getErrorLocation("forceSyncToday"));
+      return res.status(500).json({
+        result: false,
+        content: [],
+        error: [error.message || "No se pudo obtener la tasa del banco. Revisa la consola del servidor."],
       });
     }
   };
