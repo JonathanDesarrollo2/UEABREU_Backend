@@ -944,8 +944,9 @@ export class BillingService {
     for (const student of students) {
       const currentBalanceUSD = student.balance || 0;
 
-      // Solo a deudores
-      if (currentBalanceUSD >= 0) continue;
+      // ⚠️ CAMBIO AQUÍ: Solo aplicar el recargo si la deuda supera 1 USD.
+      // Si la deuda es -0.50, se salta. Si la deuda es -1.00, se salta.
+      if (currentBalanceUSD >= -1.00) continue;
 
       // ¿Ya tiene el recargo este mes? → saltar (idempotencia)
       const existingRecargo = await Transaction.findOne({
