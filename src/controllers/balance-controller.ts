@@ -1534,10 +1534,10 @@ export class BalanceController {
   // RANKING DE ESTUDIANTES (deudores / al día)
   // GET /private/balance/students-ranking
   // ==================================================================
-  static getStudentsRanking = async (req: Request, res: Response) => {
+    static getStudentsRanking = async (req: Request, res: Response) => {
     try {
       const {
-        type = 'debtors',           // 'debtors' | 'creditors' | 'all'
+        type = 'debtors',           // 'debtors' | 'creditors' | 'up_to_date' | 'all'
         search = '',
         representativeId,
         grade,
@@ -1554,8 +1554,15 @@ export class BalanceController {
       if (section) where.section = section;
       if (representativeId) where.representativeId = representativeId;
 
-      if (type === 'debtors') where.balance = { [Op.lt]: 0 };
-      else if (type === 'creditors') where.balance = { [Op.gt]: 0 };
+      // 🔥 AQUÍ ESTÁ LA LÓGICA NUEVA
+      if (type === 'debtors') {
+        where.balance = { [Op.lt]: -1 }; // Estrictamente deudores (más de $1 de deuda)
+      } else if (type === 'creditors') {
+        where.balance = { [Op.gt]: 0 }; // Saldo a favor (positivo)
+      } else if (type === 'up_to_date') {
+        where.balance = { [Op.gte]: -1, [Op.lte]: 0 }; // Al día: entre -1 y 0
+      }
+      // Si type es 'all', no se aplica filtro de balance.
 
       if (search && typeof search === 'string' && search.trim()) {
         where[Op.or] = [
@@ -1608,7 +1615,7 @@ export class BalanceController {
       let totalDebtUSD = 0, totalCreditUSD = 0, countDebtors = 0, countCreditors = 0;
       allFiltered.forEach((s: any) => {
         const b = s.balance || 0;
-        if (b < 0) { totalDebtUSD += Math.abs(b); countDebtors++; }
+        if (b < -1) { totalDebtUSD += Math.abs(b); countDebtors++; }
         else if (b > 0) { totalCreditUSD += b; countCreditors++; }
       });
 
