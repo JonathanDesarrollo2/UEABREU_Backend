@@ -92,12 +92,33 @@ export class BankAPI {
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
+        if (!response.ok) {
       let errorBody = '';
       try { errorBody = await response.text(); } catch { errorBody = '(sin body)'; }
 
       console.error(`🚨 [BNC] HTTP ${response.status} en ${endpoint}`);
       console.error(`🚨 [BNC] Body: ${errorBody}`);
+
+      // 🔄 NUEVO: El banco devuelve EPIRWK (RWK) como HTTP 409 para pedir
+      // que se refresque la WorkingKey. Re-autenticamos y reintentamos UNA vez.
+      if (response.status === 409 && endpoint !== '/Auth/LogOn') {
+        const bodyUpper = errorBody.toUpperCase();
+        if (bodyUpper.includes('EPIRWK') || bodyUpper.includes('RWK')) {
+          console.log('🔄 [BNC] El banco solicita refrescar WorkingKey (EPIRWK). Re-autenticando...');
+          try {
+            this.workingKey = null;
+            await this.authenticate();
+            console.log('✅ [BNC] Re-autenticación exitosa. Reintentando petición original...');
+            return this.sendRequest<T>(endpoint, payload, useMasterKey);
+          } catch (authError: any) {
+            console.error('❌ [BNC] Falló la re-autenticación tras EPIRWK:', authError.message);
+            throw new Error(
+              `La sesión del banco expiró y no se pudo restablecer. ` +
+              `Por favor intenta de nuevo en unos minutos. (${authError.message})`
+            );
+          }
+        }
+      }
 
       if (response.status === 409 && endpoint === '/Auth/LogOn') {
         this.workingKey = null;
@@ -110,8 +131,18 @@ export class BankAPI {
 
     if (bankResponse.status !== 'OK') {
       if (bankResponse.message.includes('RWK')) {
-        await this.authenticate();
-        return this.sendRequest<T>(endpoint, payload, useMasterKey);
+        console.log('🔄 [BNC] RWK detectado en respuesta 200+KO. Re-autenticando...');
+        try {
+          await this.authenticate();
+          console.log('✅ [BNC] Re-autenticación exitosa. Reintentando petición original...');
+          return this.sendRequest<T>(endpoint, payload, useMasterKey);
+        } catch (authError: any) {
+          console.error('❌ [BNC] Falló la re-autenticación tras RWK:', authError.message);
+          throw new Error(
+            `La sesión del banco expiró y no se pudo restablecer. ` +
+            `Por favor intenta de nuevo en unos minutos. (${authError.message})`
+          );
+        }
       }
       throw new Error(bankResponse.message || 'Error en respuesta del banco');
     }
