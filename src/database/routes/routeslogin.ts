@@ -12,6 +12,7 @@ const RouterUser = Router();
 
 // Crear usuario
 RouterUser.post('/adduser' 
+    ,authsession
     ,body('usermail')
         .notEmpty().withMessage('Es requerido ingresar el email del Usuario')
         .isEmail().withMessage('Es requerido ingresar un Email Valido')
@@ -57,7 +58,7 @@ RouterUser.get('/listpag',
     query('nivelFilter')
         .optional()
         .isString().withMessage('El filtro de nivel debe ser un texto')
-        .isIn(['all', '1', '2', '3', '4', '5']).withMessage('El filtro de nivel debe ser: all, 1, 2, 3, 4 o 5'),
+        .isIn(['all', '1', '2', '3', '4', '5', '6']).withMessage('El filtro de nivel debe ser: all, 1, 2, 3, 4, 5 o 6'),
     validateRoutes,
     User.getPaginatedlogin
 );
