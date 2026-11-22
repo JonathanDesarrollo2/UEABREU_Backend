@@ -84,14 +84,24 @@ static adduser = async (req: Request, res: Response) => {
                 error: ['No tienes permisos para crear usuarios']
             });
         }
+
+        if (requesterNivel !== 2 && targetNivel === 6) {
+            await transaction.rollback();
+            return res.status(403).json({
+                result: false,
+                content: [],
+                error: ['Solo el Administrador (nivel 2) puede crear Coordinadores de Evaluación']
+            });
+        }
         // ─────────────────────────────────────────────────────────
 
-        // Nivel 2 (Administrador), Nivel 3 (Funcional), Nivel 4 (Secretario)
-        // y Nivel 5 (Administrativo 2) requieren teléfono y cédula
+        // Nivel 2 (Administrador), Nivel 3 (Funcional), Nivel 4 (Secretario),
+        // Nivel 5 (Administrativo 2) y Nivel 6 (Coordinador) requieren teléfono y cédula
         const requiresContactData = Number(userFields.nivel) === 2
             || Number(userFields.nivel) === 3
             || Number(userFields.nivel) === 4
-            || Number(userFields.nivel) === 5;
+            || Number(userFields.nivel) === 5
+            || Number(userFields.nivel) === 6;
 
         if (requiresContactData && (!phone || !identityCard)) {
             await transaction.rollback();
@@ -174,8 +184,8 @@ static adduser = async (req: Request, res: Response) => {
             userpass: userpass,
             nivel: userFields.nivel || 1,
             userstatus: userFields.userstatus !== undefined ? userFields.userstatus : true,
-            // Se persiste para Admin (2), Funcional (3), Secretario (4) y Administrativo 2 (5)
-            ...(Number(userFields.nivel) === 2 || Number(userFields.nivel) === 3 || Number(userFields.nivel) === 4 || Number(userFields.nivel) === 5
+            // Se persiste para Admin (2), Funcional (3), Secretario (4), Administrativo 2 (5) y Coordinador (6)
+            ...(Number(userFields.nivel) === 2 || Number(userFields.nivel) === 3 || Number(userFields.nivel) === 4 || Number(userFields.nivel) === 5 || Number(userFields.nivel) === 6
                 ? { phone, identityCard }
                 : {})
         }, { transaction });
@@ -460,7 +470,7 @@ static adduser = async (req: Request, res: Response) => {
       }
 
       const targetNivel = Number(userUpdateData.nivel ?? ResultadoDB.nivel);
-      if (targetNivel === 2 && (!phone || !identityCard) && (!ResultadoDB.phone || !ResultadoDB.identityCard)) {
+      if ((targetNivel === 2 || targetNivel === 6) && (!phone || !identityCard) && (!ResultadoDB.phone || !ResultadoDB.identityCard)) {
         await transaction.rollback();
         return res.status(400).json({ result: false, content: [], error: ['Teléfono y cédula son obligatorios para administradores'] });
       }
@@ -499,7 +509,7 @@ static adduser = async (req: Request, res: Response) => {
 
       // Actualizar datos del usuario
       const cleanUserUpdateData = Object.fromEntries(
-        Object.entries({ ...userUpdateData, ...(Number(userUpdateData.nivel ?? ResultadoDB.nivel) === 2 ? { phone, identityCard } : {}) })
+        Object.entries({ ...userUpdateData, ...((Number(userUpdateData.nivel ?? ResultadoDB.nivel) === 2 || Number(userUpdateData.nivel ?? ResultadoDB.nivel) === 6) ? { phone, identityCard } : {}) })
           .filter(([, value]) => value !== undefined)
       );
       await ResultadoDB.update(cleanUserUpdateData, { transaction });
