@@ -61,27 +61,26 @@ static adduser = async (req: Request, res: Response) => {
 
         // ── VALIDACIÓN DE PERMISOS POR NIVEL ─────────────────────
         // Nivel 2 (Admin): puede crear cualquier nivel
-        // Nivel 3 (Funcional): solo puede crear nivel 1 (Representante)
+        // Nivel 3 (Financiero) y Nivel 5 (Administrativo 2): solo pueden crear nivel 1 (Representante)
         // Nivel 4 (Secretario): no puede crear usuarios
-        // Nivel 5 (Administrativo 2): no puede crear usuarios
         const requesterNivel = Number(req.tokenData?.nivel);
         const targetNivel = Number(userFields.nivel) || 1;
 
-        if (requesterNivel === 3 && targetNivel !== 1) {
-            await transaction.rollback();
-            return res.status(403).json({
-                result: false,
-                content: [],
-                error: ['No tienes permisos para crear usuarios de este nivel']
-            });
-        }
-
-        if (requesterNivel === 4 || requesterNivel === 5) {
+        if (requesterNivel === 4) {
             await transaction.rollback();
             return res.status(403).json({
                 result: false,
                 content: [],
                 error: ['No tienes permisos para crear usuarios']
+            });
+        }
+
+        if ((requesterNivel === 3 || requesterNivel === 5) && targetNivel !== 1) {
+            await transaction.rollback();
+            return res.status(403).json({
+                result: false,
+                content: [],
+                error: ['Solo puedes crear Representantes']
             });
         }
 
