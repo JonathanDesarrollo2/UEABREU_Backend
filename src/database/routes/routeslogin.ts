@@ -12,6 +12,7 @@ const RouterUser = Router();
 
 // Crear usuario
 RouterUser.post('/adduser' 
+    ,authsession
     ,body('usermail')
         .notEmpty().withMessage('Es requerido ingresar el email del Usuario')
         .isEmail().withMessage('Es requerido ingresar un Email Valido')
